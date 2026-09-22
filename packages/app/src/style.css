@@ -149,3 +149,11 @@ h4:first-child { margin-top: 0; }
 .spin:first-child { border-radius: 0 4px 0 0; }
 .spin:last-child { border-radius: 0 0 4px 0; margin-top: -1px; }
 .spin:active { background: #1d4e66; }
+
+/* F-key character set bar in the footer */
+.fkeys { display: inline-flex; align-items: center; gap: 3px; }
+.fkey { display: inline-flex; align-items: baseline; gap: 3px; padding: 0 5px; height: 20px; font-size: 11px; }
+.fkey kbd { margin: 0; font-size: 9px; }
+.fkey .g { font-size: 13px; line-height: 1; }
+.fkey.arrow { color: var(--muted); }
+.beside { margin-left: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30vw; }

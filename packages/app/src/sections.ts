@@ -129,7 +129,7 @@ export function characterPanel(ed: Editor): Panel {
     ctx.strokeRect((ed.glyph % 16) * 8 + 0.5, Math.floor(ed.glyph / 16) * 16 + 0.5, 7, 15);
   };
   update();
-  return { el: panel("character", "Character", true, "All 256 CP437 characters. F1–F4 pick ░ ▒ ▓ █.", picker), update };
+  return { el: panel("character", "Character", true, "All 256 CP437 characters. F1–F10 pick from the active F-key set (F11/F12 change set; the set shows in the footer while typing).", picker), update };
 }
 
 // ------------------------------------------------------------------ left: selecting

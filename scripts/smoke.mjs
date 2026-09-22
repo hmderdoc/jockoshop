@@ -597,6 +597,33 @@ check("Cmd+V pastes what was cut", await kd(() => window.kd.ed.doc.layers[1].tex
 await page.keyboard.press("Escape");
 await shot("14-prose");
 
+// F-key character sets: the TheDraw / PabloDraw / Moebius convention
+await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed);
+await kd(() => { const e = window.kd.ed; e.zoomFit = false; e.zoom = 2; window.kd.view.paint(); e.emit("ui"); });
+await page.keyboard.press("t");
+const fkBar = await kd(() => ({ shown: !!document.querySelector(".status .fkeys"), slots: [...document.querySelectorAll(".fkey:not(.arrow) .g")].map((g) => g.textContent).join(""), set: window.kd.ed.charset }));
+check("with the Type tool the footer shows the F-key set bar, blocks set by default", fkBar.shown && fkBar.set === 5 && fkBar.slots === "░▒▓█▀▄▌▐■·", JSON.stringify(fkBar));
+const fkAt = await cellXY(10, 10);
+await page.mouse.click(fkAt.x, fkAt.y);
+await page.keyboard.press("F1"); await page.keyboard.press("F4"); await page.keyboard.press("F6");
+const fkTyped = await kd(() => [10, 11, 12].map((x) => window.kd.ed.comp.grid.get(x, 10).glyph));
+check("F1–F10 type the set's glyphs at the typewriter caret on the grid", JSON.stringify(fkTyped) === "[176,219,220]", JSON.stringify(fkTyped));
+await page.keyboard.press("F12");
+check("F12 moves to the next set and the bar follows", await kd(() => window.kd.ed.charset === 6 && document.querySelector(".fkey:not(.arrow) .g").textContent === "☺"));
+await page.keyboard.press("F1");
+check("…and F1 now types from that set", (await cell(13, 10)).glyph === 1);
+await page.keyboard.down("Control"); await page.keyboard.press(","); await page.keyboard.up("Control");
+check("Ctrl+, goes back a set (Moebius's binding)", await kd(() => window.kd.ed.charset === 5));
+await page.keyboard.press("Escape");
+await page.keyboard.press("b");
+await page.keyboard.press("F3");
+check("with a drawing tool, an F-key sets the brush character instead", await kd(() => window.kd.ed.glyph === 178 && !document.querySelector(".status .fkeys")));
+await page.keyboard.press("t");
+await kd(() => document.querySelectorAll(".fkey:not(.arrow)")[1].click());
+check("clicking a slot in the bar with no caret sets the brush", await kd(() => window.kd.ed.glyph === 177));
+await shot("15-fkeys");
+
 check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 13 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
 await shot("12-ui");
 

@@ -36,6 +36,8 @@ export interface Tool {
   dblclick?(p: Pointer): void;
   /** CSS cursor for this position, if not the default */
   cursor?(p: Pointer): string | null;
+  /** an F-key glyph while typing: true if the tool put it somewhere (else it becomes the brush) */
+  typeGlyph?(code: number): boolean;
 }
 
 export type Handle = "corner" | "right" | "bottom";
@@ -380,7 +382,16 @@ export function createTools(ed: Editor): Tool[] {
       },
     },
     {
-      id: "text", label: "Type", key: "t", hint: "Click to place the caret, then type. Enter returns to the starting column. Esc leaves.",
+      id: "text", label: "Type", key: "t",
+      hint: "Grid typewriter: click a cell and type; F1–F10 type the character set below, F11/F12 change set. Drag out a frame instead for reflowing prose.",
+      typeGlyph(code) {
+        if (ed.prose.layer) { ed.prose.insert(String.fromCharCode(code)); return true; }
+        if (!caret) return false;
+        typeCell(caret.x, caret.y, { glyph: code });
+        caret.x = Math.min(ed.doc.width - 1, caret.x + 1);
+        ed.emit("ui");
+        return true;
+      },
       down(p) {
         const l = ed.active;
         if (l?.type === "font") {   // a live TheDraw layer is edited in the sidebar, not cell by cell

@@ -4,12 +4,13 @@
 //   node scripts/sync-fonts.mjs [/path/to/tdfonts]
 import { copyFileSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const src = process.argv[2] ?? "/Volumes/Crucial2TB/Projects/synchronet/sbbs/ctrl/tdfonts";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const dest = join(root, "packages/app/public/tdfonts");
-const { parseTdf, tdfTypeName } = await import(join(root, "packages/core/dist/index.js"));
+// a file URL, not a path: on Windows an absolute path is not a valid ESM specifier
+const { parseTdf, tdfTypeName } = await import(pathToFileURL(join(root, "packages/core/dist/index.js")).href);
 
 mkdirSync(dest, { recursive: true });
 const index = [];

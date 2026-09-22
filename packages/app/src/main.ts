@@ -1,11 +1,12 @@
 import {
-  ART_EXTENSIONS, type CellsLayer, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
+  ART_EXTENSIONS, CP437_UNICODE, type CellsLayer, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
   documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
   renderGrid, saveProject,
 } from "@killerdraw/core";
 import fontUrl from "../../core/assets/ibmstd.f16?url";
 import { Editor } from "./editor.js";
 import { FontLibrary } from "./fonts.js";
+import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
@@ -15,7 +16,7 @@ import { liveProp } from "./sections.js";
 import { importImage, scheduleImageRefresh } from "./shadeans.js";
 import { copySelection, cutSelection, deleteSelection, paste, selectAll, selectInverse, selectNone } from "./selectionops.js";
 import { createSelectTools, createTools } from "./tools.js";
-import { download, field, h } from "./ui.js";
+import { download, field, glyphLabel, h } from "./ui.js";
 import { CanvasView } from "./view.js";
 
 const ART = ART_EXTENSIONS;
@@ -204,6 +205,30 @@ async function start(): Promise<void> {
     iconButton("canvas", "Canvas size…", { tip: "add or remove rows / columns at any edge, including the top and left", onclick: canvasDialog }),
     h("span.grow"), title);
 
+  /** F1–F10: type the set's glyph where typing is happening, else make it the brush character. */
+  const typeSetGlyph = (slot: number): void => {
+    const code = CHARSETS[ed.charset][slot];
+    if (currentTool().typeGlyph?.(code)) return;
+    ed.glyph = code;
+    ed.emit("ui");
+    ed.setStatus(`Brush character: ${glyphLabel(code)} (F${slot + 1} of set ${ed.charset + 1}, ${CHARSET_NAMES[ed.charset]})`);
+  };
+  const cycleCharset = (dir: 1 | -1): void => {
+    ed.charset = (ed.charset + dir + CHARSETS.length) % CHARSETS.length;
+    ed.setStatus(`Character set ${ed.charset + 1}/${CHARSETS.length}: ${CHARSET_NAMES[ed.charset]}`);
+    ed.emit("ui");
+  };
+  /** The F-key bar shown in the footer while the Type tool is active: [F11 ◄] F1░ … F10· [F12 ►] 6/16 */
+  const charsetBar = (): HTMLElement => {
+    const set = CHARSETS[ed.charset];
+    const glyph = (c: number): string => String.fromCodePoint(CP437_UNICODE[c]);
+    return h("span.fkeys", {},
+      h("button.fkey.arrow", { title: "Previous character set (F11, Ctrl+,)", onclick: () => cycleCharset(-1) }, "F11 ◄"),
+      ...set.map((c, i) => h("button.fkey", { title: `F${i + 1}: ${glyphLabel(c)}`, onclick: () => typeSetGlyph(i) }, h("kbd", {}, `F${i + 1}`), h("span.g", {}, glyph(c)))),
+      h("button.fkey.arrow", { title: "Next character set (F12, Ctrl+.)", onclick: () => cycleCharset(1) }, "F12 ►"),
+      h("span.muted", { title: CHARSET_NAMES[ed.charset] }, `${ed.charset + 1}/${CHARSETS.length} ${CHARSET_NAMES[ed.charset]}`));
+  };
+
   const status = h("footer.status");
   const renderStatus = (): void => {
     const p = view.hoverCell, g = ed.comp.grid;
@@ -219,7 +244,10 @@ async function start(): Promise<void> {
         ? (ed.prose.layer ? "Typing into the prose frame. Esc stops editing." : "Click in the frame to place the caret. With Move, drag its edges to resize.")
       : ed.tool === "text" ? "Click to type cells (typewriter), or drag out a frame for reflowing prose."
       : ed.tool === "move" && ed.active?.type === "font" ? `${currentTool().hint} Double-click the text to edit it.` : currentTool().hint;
-    status.replaceChildren(h("span", {}, ed.status || hint), h("span.grow"), h("span.muted", {}, where));
+    // under the Type tool the F-key bar stays put; messages appear beside it and the long hint is dropped
+    status.replaceChildren(
+      ...(ed.tool === "text" ? [charsetBar(), ed.status && h("span.muted.beside", {}, ed.status)] : [h("span", {}, ed.status || hint)]).filter((n): n is HTMLElement => !!n),
+      h("span.grow"), h("span.muted", {}, where));
   };
 
   document.getElementById("app")!.append(topbar,
@@ -253,6 +281,7 @@ async function start(): Promise<void> {
     if (typing) return;
     if (currentTool().keydown?.(e)) { e.preventDefault(); return; }
     const k = e.key.toLowerCase();
+    if (e.ctrlKey && (e.key === "," || e.key === ".")) { e.preventDefault(); cycleCharset(e.key === "," ? -1 : 1); return; }   // Moebius's set keys
     const editingProse = ed.prose.layer && ed.tool === "text";
     if (editingProse && mod && k === "a") { e.preventDefault(); ed.prose.selectAll(); return; }
     if (editingProse && mod && (k === "c" || k === "x")) {
@@ -274,8 +303,12 @@ async function start(): Promise<void> {
     if ((e.key === "Delete" || e.key === "Backspace") && ed.selection) { e.preventDefault(); deleteSelection(ed); return; }
     if (e.key === "Escape" && ed.selection) { selectNone(ed); return; }
     if (mod) return;
-    const shade = ["F1", "F2", "F3", "F4"].indexOf(e.key);
-    if (shade >= 0) { e.preventDefault(); ed.glyph = [176, 177, 178, 219][shade]; ed.emit("ui"); return; }
+    const fkey = /^F(\d+)$/.exec(e.key);
+    if (fkey) {
+      const n = Number(fkey[1]);
+      if (n >= 1 && n <= 10) { e.preventDefault(); typeSetGlyph(n - 1); return; }
+      if (n === 11 || n === 12) { e.preventDefault(); cycleCharset(n === 11 ? -1 : 1); return; }
+    }
     const tool = tools.find((t) => t.key === e.key.toLowerCase());
     if (tool) ed.chooseTool(tool.id);
   });

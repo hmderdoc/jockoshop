@@ -5,6 +5,7 @@ import {
   type WandOptions, composite, createDocument, findLayer, glyphInfoFromFont, groupCommand, propertyCommand,
   refreshProseLayer,
 } from "@killerdraw/core";
+import { DEFAULT_CHARSET } from "./charsets.js";
 import { ProseEditing } from "./prosetool.js";
 
 export type ToolId = "pencil" | "half" | "eraser" | "line" | "rect" | "fill" | "pick" | "move" | "text"
@@ -41,6 +42,8 @@ export class Editor {
   fg: Color = 7;
   bg: Color = 0;
   glyph = 219;
+  /** the active F-key character set (index into CHARSETS) */
+  charset = DEFAULT_CHARSET;
   /** which channels the drawing tools write; turning one off leaves it as it is (or see-through) */
   drawGlyph = true;
   drawFg = true;
