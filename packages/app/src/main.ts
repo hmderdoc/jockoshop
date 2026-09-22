@@ -21,6 +21,9 @@ import { download, field, glyphLabel, h } from "./ui.js";
 import { CanvasView } from "./view.js";
 
 const ART = ART_EXTENSIONS;
+/** project files: .jock, and .kdraw from before the rename */
+const PROJECT_EXTENSIONS = ["jock", "kdraw"];
+const isProject = (name: string): boolean => /\.(jock|kdraw)$/i.test(name);
 
 async function start(): Promise<void> {
   const font = parseRawFont(new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()));
@@ -67,7 +70,7 @@ async function start(): Promise<void> {
   /** Open a picked file as the document: a project, or flat art as a one-layer document. */
   const openPicked = (file: Picked): void => {
     try {
-      const project = /\.kdraw$/i.test(file.name);
+      const project = isProject(file.name);
       ed.setDocument(project ? loadProject(file.bytes) : documentFromArt(parseArt(file.bytes, file.name)), file.name, project ? file.path : undefined);
       remember(file.path);
       ed.setStatus(`Opened ${file.name} — ${ed.doc.width}×${ed.doc.height}`);
@@ -78,7 +81,7 @@ async function start(): Promise<void> {
 
   const openFile = async (): Promise<void> => {
     if (!(await confirmDiscard())) return;
-    const file = await io.open(["kdraw", ...ART]);
+    const file = await io.open([...PROJECT_EXTENSIONS, ...ART]);
     if (file) openPicked(file);
   };
 
@@ -92,12 +95,12 @@ async function start(): Promise<void> {
     } catch (err) { ed.setStatus(`Could not import ${file.name}: ${(err as Error).message}`); }
   };
 
-  const PROJECT = { name: "jockoshop project", extensions: ["kdraw"] };
+  const PROJECT = { name: "jockoshop project", extensions: ["jock"] };
   /** Save in place when the document has a path, else Save As. */
   const saveProjectFile = async (as = false): Promise<boolean> => {
     const bytes = saveProject(ed.doc);
     if (!as && await io.save(ed.filePath, bytes)) { ed.markSaved(); ed.setStatus(`Saved ${ed.fileName}`); return true; }
-    const path = await io.saveAs(`${baseName()}.kdraw`, bytes, PROJECT);
+    const path = await io.saveAs(`${baseName()}.jock`, bytes, PROJECT);
     if (path === null) return false;
     if (path) { ed.filePath = path; ed.fileName = path.replace(/^.*[\\/]/, ""); }
     remember(ed.filePath);
@@ -112,11 +115,15 @@ async function start(): Promise<void> {
     const [first] = files;
     if (!first) return;
     void (async () => {
-      if (/\.kdraw$/i.test(first.name)) { if (await confirmDiscard()) openPicked(first); return; }
+      if (isProject(first.name)) { if (await confirmDiscard()) openPicked(first); return; }
       const cell = at ? view.cellAt(at.x, at.y) ?? undefined : undefined;
       for (const f of files) {
         if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name)) { await importImage(ed, f.name, f.bytes, cell); continue; }
-        try { ed.addLayer(layerFromArt(parseArt(f.bytes, f.name), f.name.replace(/\.[^.]+$/, "")), "Import as layer"); }
+        try {
+          const layer = layerFromArt(parseArt(f.bytes, f.name), f.name.replace(/\.[^.]+$/, ""));
+          if (cell) { layer.x = cell.x; layer.y = cell.y; }
+          ed.addLayer(layer, "Import as layer");
+        }
         catch (err) { ed.setStatus(`Could not import ${f.name}: ${(err as Error).message}`); }
       }
       if (files.length > 1 || cell) ed.setStatus(`Added ${files.length} layer(s)${cell ? ` at ${cell.x + 1},${cell.y + 1}` : ""}.`);
@@ -225,10 +232,10 @@ async function start(): Promise<void> {
   const topbar = h("header.topbar", {},
     h("strong.logo", {}, "jockoshop"),
     iconButton("new", "New document", { onclick: () => void newDocument() }),
-    iconButton("open", "Open…", { tip: "a .kdraw project, or an .ans / .bin / .xb as a new document", onclick: () => void openFile() }),
+    iconButton("open", "Open…", { tip: "a .jock project, or an .ans / .bin / .xb as a new document (drop a file on the window to add it as a layer instead)", onclick: () => void openFile() }),
     ...(io.desktop ? [h("span.menu-anchor", {}, recentBtn, recentMenu)] : []),
     iconButton("importLayer", "Import as layer…", { tip: "add an .ans / .bin / .xb on top as a new layer", onclick: () => void importLayer() }),
-    iconButton("save", "Save project (Ctrl/Cmd+S)", { tip: io.inPlace ? "in place; Shift-click for Save As" : "downloads a .kdraw — layers, live text and key rules stay editable", onclick: (e) => void saveProjectFile(e.shiftKey) }),
+    iconButton("save", "Save project (Ctrl/Cmd+S)", { tip: io.inPlace ? "in place; Shift-click for Save As" : "downloads a .jock — layers, live text and key rules stay editable", onclick: (e) => void saveProjectFile(e.shiftKey) }),
     h("span.menu-anchor", {}, exportBtn, exportMenu),
     h("span.sep"), undoBtn, redoBtn, h("span.sep"),
     h("button.ib", { title: "Zoom out", "aria-label": "Zoom out", onclick: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)) }, "−"), zoom,

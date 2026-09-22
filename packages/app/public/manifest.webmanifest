@@ -16,7 +16,7 @@
   "file_handlers": [
     {
       "action": "/",
-      "accept": { "application/x-jockoshop": [".kdraw"] }
+      "accept": { "application/x-jockoshop": [".jock", ".kdraw"] }
     },
     {
       "action": "/",

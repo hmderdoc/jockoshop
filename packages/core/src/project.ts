@@ -1,5 +1,5 @@
 /**
- * The killerdraw project file: a ZIP with
+ * The jockoshop project file (.jock): a ZIP with
  *   manifest.json      document settings and the layer tree (recipes, key rules)
  *   layers/<id>.bin    cell data of Cells layers
  *   layers/<id>.mask.bin    layer mask, if the layer has one
@@ -14,7 +14,9 @@ import type { KdDocument, Layer, LayerMask } from "./document.js";
 import { encodeAnsi } from "./formats/ansi.js";
 import { CellGrid } from "./grid.js";
 
-export const PROJECT_FORMAT = "killerdraw", PROJECT_VERSION = 1;
+export const PROJECT_FORMAT = "jockoshop", PROJECT_VERSION = 1;
+/** the format name written before the rename; those files still open */
+const LEGACY_FORMAT = "killerdraw";
 
 const GRID_MAGIC = "KDG1";
 
@@ -128,9 +130,9 @@ export function saveProject(doc: KdDocument): Uint8Array {
 export function loadProject(bytes: Uint8Array): KdDocument {
   const files = unzipSync(bytes);
   const raw = files["manifest.json"];
-  if (!raw) throw new Error("not a killerdraw project: no manifest.json");
+  if (!raw) throw new Error("not a jockoshop project: no manifest.json");
   const manifest = JSON.parse(strFromU8(raw));
-  if (manifest.format !== PROJECT_FORMAT) throw new Error("not a killerdraw project");
+  if (manifest.format !== PROJECT_FORMAT && manifest.format !== LEGACY_FORMAT) throw new Error("not a jockoshop project");
   if (manifest.version > PROJECT_VERSION) {
     throw new Error(`project version ${manifest.version} is newer than this build understands (${PROJECT_VERSION})`);
   }

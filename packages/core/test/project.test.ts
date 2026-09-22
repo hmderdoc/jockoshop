@@ -1,4 +1,4 @@
-import { unzipSync } from "fflate";
+import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import { describe, expect, it } from "vitest";
 import {
   BLACK, BLUE, CellGrid, type CellsLayer, type FontLayer, type GroupLayer, RED, WHITE, YELLOW,
@@ -92,5 +92,28 @@ describe("importing flat art", () => {
     const out = composite(doc).grid;
     expect(out.get(0, 0)).toMatchObject({ glyph: 177, fg: BLUE });
     expect(out.get(4, 1)).toMatchObject({ glyph: 65, fg: YELLOW });
+  });
+});
+
+describe("project format name", () => {
+  it("writes the jockoshop format name", () => {
+    const files = unzipSync(saveProject(sampleDoc()));
+    expect(JSON.parse(strFromU8(files["manifest.json"]!)).format).toBe("jockoshop");
+  });
+
+  it("still opens a project saved under the old killerdraw name", () => {
+    const files = unzipSync(saveProject(sampleDoc()));
+    const manifest = JSON.parse(strFromU8(files["manifest.json"]!));
+    manifest.format = "killerdraw";
+    files["manifest.json"] = strToU8(JSON.stringify(manifest));
+    const doc = loadProject(zipSync(files));
+    expect(doc.width).toBe(20);
+    expect(doc.layers.length).toBe(2);
+  });
+
+  it("rejects a ZIP that is some other format", () => {
+    const files = unzipSync(saveProject(sampleDoc()));
+    files["manifest.json"] = strToU8(JSON.stringify({ format: "other", version: 1 }));
+    expect(() => loadProject(zipSync(files))).toThrow(/not a jockoshop project/);
   });
 });

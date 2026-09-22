@@ -59,7 +59,8 @@ runs; text layers and image layers say what is missing.
 - **3dBBS files reopen in 3D**: an exported `.ans` with depth tags opens as one layer per depth plane, each with its depth set.
 - **SAUCE editor**: title, author, group, date, comments, font name, 9-px flag.
 - **Recent files** (desktop): the clock icon next to Open.
-- **Files**: `.kdraw` project (ZIP: manifest, layer data, masks, original assets, flattened `preview.ans`).
+- **Files**: `.jock` project (ZIP: manifest, layer data, masks, original assets, flattened `preview.ans`). Projects saved as `.kdraw` by earlier builds still open.
+  **Open** makes a new document from a file; **drop** a file on the window and it is added to the current document as a layer instead (art lands where you dropped it; a dropped `.jock` opens as the document).
   Open / import: ANS (16-colour, iCE, 24-bit), BIN, XBIN, TundraDraw `.tnd`, Synchronet Ctrl-A `.msg`, Artworx `.adf`, iCE Draw `.idf`, Avatar `.avt`, plain text.
   Export: ANS, 3dBBS ANS, BIN, XBIN, TundraDraw, Ctrl-A, text (CP437 or UTF-8), PNG — the same set PabloDraw writes, plus 3dBBS.
 
@@ -72,12 +73,12 @@ The same build runs at [jockoshop.futureland.today](https://jockoshop.futureland
 `public/`, so run `npm run fonts` and `npm run shadeans` first).
 
 In Chrome and Edge the File System Access API gives the web app files with handles: Open and Save As go through the
-system dialog, **Save writes back to the file** (the first save into a file you opened asks once), a dropped `.kdraw`
+system dialog, **Save writes back to the file** (the first save into a file you opened asks once), a dropped `.jock`
 can be saved back too, and exports get a Save As dialog rather than landing in Downloads. Safari and Firefox do not
-have that API, so there Save is a download of the `.kdraw` and Open is a file picker, as before.
+have that API, so there Save is a download of the `.jock` and Open is a file picker, as before.
 
 It is also a PWA: a service worker (`public/sw.js`) caches the page and the fonts you have used, so it works offline
-once visited, and the manifest lets Chrome/Edge **install** it as its own window with `.kdraw` and ANSI file
+once visited, and the manifest lets Chrome/Edge **install** it as its own window with `.jock` and ANSI file
 associations (double-click a file, or "Open with", and it lands in the running editor). Safari on macOS 14+ can add
 it to the Dock, without the file associations.
 
@@ -90,7 +91,7 @@ npm run desktop:build    # packages/desktop/src-tauri/target/release/bundle/maco
 
 Needs Rust (already required for shadeans). The desktop app is the same web app in a system webview, plus what a
 browser can't do: files with paths (Save saves in place, Shift-click / Cmd+Shift+S for Save As), a native menu bar,
-`.kdraw` / `.ans` file associations, drag a file onto the window to open or import it, files on the command line,
+`.jock` / `.ans` file associations, drag a file onto the window to add it as a layer (a `.jock` opens), files on the command line,
 and an "unsaved changes" prompt on close. Fonts and `shadeans.wasm` are compiled into the binary, so run
 `npm run fonts` and `npm run shadeans` before building.
 
