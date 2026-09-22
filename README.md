@@ -58,6 +58,22 @@ runs; text layers and image layers say what is missing.
 
 Not yet: moving/transforming a selection in place (paste-as-layer + Move covers it for now), ellipse, mirror mode, reference overlay, SAUCE editor, mesh layers, importing depth tags back into layers, opacity by re-matching, recent files, Windows/Linux builds (untested).
 
+## Web app
+
+The same build runs at [jockoshop.futureland.today](https://jockoshop.futureland.today). `npm run build` writes
+`packages/app/dist`, a static site: serve it from any web server (fonts and `shadeans.wasm` are copied in from
+`public/`, so run `npm run fonts` and `npm run shadeans` first).
+
+In Chrome and Edge the File System Access API gives the web app files with handles: Open and Save As go through the
+system dialog, **Save writes back to the file** (the first save into a file you opened asks once), a dropped `.kdraw`
+can be saved back too, and exports get a Save As dialog rather than landing in Downloads. Safari and Firefox do not
+have that API, so there Save is a download of the `.kdraw` and Open is a file picker, as before.
+
+It is also a PWA: a service worker (`public/sw.js`) caches the page and the fonts you have used, so it works offline
+once visited, and the manifest lets Chrome/Edge **install** it as its own window with `.kdraw` and ANSI file
+associations (double-click a file, or "Open with", and it lands in the running editor). Safari on macOS 14+ can add
+it to the Dock, without the file associations.
+
 ## Desktop app (Tauri)
 
 ```sh

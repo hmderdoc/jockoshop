@@ -1,0 +1,26 @@
+{
+  "name": "jockoshop",
+  "short_name": "jockoshop",
+  "description": "A layered, non-destructive ANSI art editor",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0e1a",
+  "theme_color": "#0b0e1a",
+  "categories": ["graphics", "productivity"],
+  "icons": [
+    { "src": "/favicon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }
+  ],
+  "launch_handler": { "client_mode": "focus-existing" },
+  "file_handlers": [
+    {
+      "action": "/",
+      "accept": { "application/x-jockoshop": [".kdraw"] }
+    },
+    {
+      "action": "/",
+      "accept": { "text/x-ansi": [".ans", ".asc", ".diz", ".nfo", ".bin", ".xb", ".xbin", ".tnd", ".adf", ".idf", ".avt", ".msg"] }
+    }
+  ]
+}

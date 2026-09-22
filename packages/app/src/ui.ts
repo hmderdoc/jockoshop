@@ -156,14 +156,26 @@ export function pickFile(accept: string): Promise<File | null> {
   });
 }
 
-/** Hand the user a file. In the desktop shell this is a Save As dialog; in a browser, a download. */
+/** Hand the user a file. In the desktop shell (or a browser with the File System Access API) this is a Save As dialog; elsewhere, a download. */
 export function download(name: string, bytes: Uint8Array, type = "application/octet-stream"): void {
+  const ext = name.replace(/^.*\./, "");
   if ("__TAURI_INTERNALS__" in window) {
     void (async () => {
       const [{ save }, { invoke }] = await Promise.all([import("@tauri-apps/plugin-dialog"), import("@tauri-apps/api/core")]);
-      const ext = name.replace(/^.*\./, "");
       const path = await save({ defaultPath: name, filters: [{ name: ext.toUpperCase(), extensions: [ext] }] });
       if (path) await invoke("write_file", { path, data: Array.from(bytes) });
+    })();
+    return;
+  }
+  if ("showSaveFilePicker" in window) {
+    const picker = window.showSaveFilePicker as (o: { suggestedName: string; types: { description: string; accept: Record<string, string[]> }[] }) => Promise<FileSystemFileHandle>;
+    void (async () => {
+      let handle: FileSystemFileHandle;
+      try { handle = await picker({ suggestedName: name, types: [{ description: ext.toUpperCase(), accept: { [type]: [`.${ext}`] } }] }); }
+      catch (err) { if (err instanceof DOMException && err.name === "AbortError") return; throw err; }
+      const w = await handle.createWritable();
+      await w.write(bytes as BufferSource);
+      await w.close();
     })();
     return;
   }

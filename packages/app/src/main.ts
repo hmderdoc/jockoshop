@@ -196,7 +196,7 @@ async function start(): Promise<void> {
     iconButton("new", "New document", { onclick: () => void newDocument() }),
     iconButton("open", "Open…", { tip: "a .kdraw project, or an .ans / .bin / .xb as a new document", onclick: () => void openFile() }),
     iconButton("importLayer", "Import as layer…", { tip: "add an .ans / .bin / .xb on top as a new layer", onclick: () => void importLayer() }),
-    iconButton("save", io.desktop ? "Save project (Ctrl/Cmd+S)" : "Save project (Ctrl/Cmd+S)", { tip: io.desktop ? "in place; Shift-click for Save As" : "downloads a .kdraw — layers, live text and key rules stay editable", onclick: (e) => void saveProjectFile(e.shiftKey) }),
+    iconButton("save", "Save project (Ctrl/Cmd+S)", { tip: io.inPlace ? "in place; Shift-click for Save As" : "downloads a .kdraw — layers, live text and key rules stay editable", onclick: (e) => void saveProjectFile(e.shiftKey) }),
     h("span.menu-anchor", {}, exportBtn, exportMenu),
     h("span.sep"), undoBtn, redoBtn, h("span.sep"),
     h("button.ib", { title: "Zoom out", "aria-label": "Zoom out", onclick: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)) }, "−"), zoom,
@@ -328,6 +328,12 @@ async function start(): Promise<void> {
     });
   }
   (window as unknown as { kd: unknown }).kd = { ed, tools, view, lib, io };
+
+  // the web app works offline once visited, and can be installed (see public/sw.js and manifest.webmanifest);
+  // the dev server and the Tauri shell have no use for the worker
+  if (import.meta.env.PROD && !io.desktop && "serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").catch((err: unknown) => console.warn("service worker:", err));
+  }
 }
 
 async function loadDemo(ed: Editor, lib: FontLibrary): Promise<void> {

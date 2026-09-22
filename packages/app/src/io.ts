@@ -1,19 +1,25 @@
 /**
- * File access, in the two places the app runs. In a browser a "save" is a
+ * File access, in the three places the app runs. In a browser a "save" is a
  * download and "open" is a file picker; in the desktop shell (Tauri) files have
- * paths, so save writes in place and the OS can hand us files to open.
+ * paths, so save writes in place and the OS can hand us files to open; a
+ * Chromium browser sits in between — the File System Access API gives us file
+ * handles, so save writes in place there too, and as an installed PWA the OS
+ * hands us files through the launch queue.
  */
 import { download, pickFile } from "./ui.js";
 
 export interface Picked {
   name: string;
   bytes: Uint8Array;
-  /** full path, when the platform has one */
+  /** full path, when the platform has one (a `handle:` key with the File System Access API) */
   path?: string;
 }
 
 export interface FileIO {
+  /** the Tauri shell: native menu, window close events */
   readonly desktop: boolean;
+  /** save writes back to the opened file rather than downloading a copy */
+  readonly inPlace: boolean;
   open(accept: string[]): Promise<Picked | null>;
   /** save to a known path; returns false when there is none */
   save(path: string | undefined, bytes: Uint8Array): Promise<boolean>;
@@ -32,6 +38,7 @@ let browserDirty = false;
 
 const browserIO: FileIO = {
   desktop: false,
+  inPlace: false,
   async open(accept) {
     const file = await pickFile(accept.map((e) => `.${e}`).join(","));
     return file ? { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) } : null;
@@ -56,6 +63,109 @@ const browserIO: FileIO = {
   setTitle(title) { document.title = title; },
 };
 
+// --- File System Access API (Chromium): handles instead of paths.
+// Not in lib.dom, since only Chromium has it.
+interface FSFileHandle extends FileSystemFileHandle {
+  queryPermission(d: { mode: "read" | "readwrite" }): Promise<PermissionState>;
+  requestPermission(d: { mode: "read" | "readwrite" }): Promise<PermissionState>;
+}
+interface PickerType { description: string; accept: Record<string, string[]> }
+interface FSWindow {
+  showOpenFilePicker(o: { multiple?: boolean; types?: PickerType[] }): Promise<FSFileHandle[]>;
+  showSaveFilePicker(o: { suggestedName?: string; types?: PickerType[] }): Promise<FSFileHandle>;
+  launchQueue?: { setConsumer(fn: (params: { files: FileSystemHandle[] }) => void): void };
+}
+const fsWindow = (): FSWindow | null => "showSaveFilePicker" in window && "showOpenFilePicker" in window ? window as unknown as FSWindow : null;
+
+/** Write a whole file through a handle; false when the user does not let us. */
+async function writeHandle(handle: FSFileHandle, bytes: Uint8Array): Promise<boolean> {
+  if (await handle.queryPermission({ mode: "readwrite" }) !== "granted" && await handle.requestPermission({ mode: "readwrite" }) !== "granted") return false;
+  const w = await handle.createWritable();
+  await w.write(bytes as BufferSource);
+  await w.close();
+  return true;
+}
+
+const pickerTypes = (name: string, extensions: string[]): PickerType[] => [{ description: name, accept: { "application/octet-stream": extensions.map((e) => `.${e}`) } }];
+
+/** The picker throws AbortError when the user cancels; anything else is a real error. */
+const cancelled = (err: unknown): boolean => err instanceof DOMException && err.name === "AbortError";
+
+function fsAccessIO(fs: FSWindow): FileIO {
+  // A handle has no path, so the document's "path" is a key into this map. The
+  // key ends in the file name so callers that take the base name of a path
+  // keep working. Handles live for the session only.
+  const handles = new Map<string, FSFileHandle>();
+  let next = 1;
+  const remember = (handle: FSFileHandle): string => {
+    const key = `handle:${next++}/${handle.name}`;
+    handles.set(key, handle);
+    return key;
+  };
+  const picked = async (handle: FSFileHandle): Promise<Picked> => {
+    const file = await handle.getFile();
+    return { name: handle.name, path: remember(handle), bytes: new Uint8Array(await file.arrayBuffer()) };
+  };
+  const isFile = (h: FileSystemHandle): h is FSFileHandle => h.kind === "file";
+  return {
+    desktop: false,
+    inPlace: true,
+    async open(accept) {
+      try {
+        const [handle] = await fs.showOpenFilePicker({ types: pickerTypes("jockoshop / ANSI art", accept) });
+        return handle ? picked(handle) : null;
+      } catch (err) { if (cancelled(err)) return null; throw err; }
+    },
+    async save(path, bytes) {
+      const handle = path ? handles.get(path) : undefined;
+      return handle ? writeHandle(handle, bytes) : false;
+    },
+    async saveAs(suggested, bytes, kind) {
+      let handle: FSFileHandle;
+      try { handle = await fs.showSaveFilePicker({ suggestedName: suggested, types: pickerTypes(kind.name, kind.extensions) }); }
+      catch (err) { if (cancelled(err)) return null; throw err; }
+      if (!(await writeHandle(handle, bytes))) return null;
+      return remember(handle);
+    },
+    async readPath(path) {
+      const handle = handles.get(path);
+      if (!handle) throw new Error(`no open file for ${path}`);
+      return picked(handle);
+    },
+    onOpenRequest(fn) {
+      // dropping a file on the page opens it — through its handle where the browser gives us one, so a dropped project can be saved back
+      window.addEventListener("dragover", (e) => e.preventDefault());
+      window.addEventListener("drop", async (e) => {
+        e.preventDefault();
+        // both getters must run before the event ends; the items are gone after the first await
+        const items = [...(e.dataTransfer?.items ?? [])].filter((i) => i.kind === "file").map((item) => ({
+          handle: "getAsFileSystemHandle" in item ? (item as DataTransferItem & { getAsFileSystemHandle(): Promise<FileSystemHandle | null> }).getAsFileSystemHandle() : null,
+          file: item.getAsFile(),
+        }));
+        const files = await Promise.all(items.map(async ({ handle, file }): Promise<Picked | null> => {
+          const h = await handle;
+          if (h && isFile(h)) return picked(h);
+          return file ? { name: file.name, bytes: new Uint8Array(await file.arrayBuffer()) } : null;
+        }));
+        const got = files.filter((f): f is Picked => f !== null);
+        if (got.length) fn(got, { x: e.clientX, y: e.clientY });
+      });
+      // an installed PWA: files the OS opens with us (file_handlers in the manifest)
+      fs.launchQueue?.setConsumer((params) => {
+        void (async () => {
+          const files = await Promise.all(params.files.filter(isFile).map(picked));
+          if (files.length) fn(files);
+        })();
+      });
+    },
+    onCloseRequest() {
+      window.addEventListener("beforeunload", (e) => { if (browserDirty) e.preventDefault(); });
+    },
+    setDirty(dirty) { browserDirty = dirty; },
+    setTitle(title) { document.title = title; },
+  };
+}
+
 async function tauriIO(): Promise<FileIO> {
   const [{ invoke }, { listen }, { open, save }, { getCurrentWindow }] = await Promise.all([
     import("@tauri-apps/api/core"), import("@tauri-apps/api/event"), import("@tauri-apps/plugin-dialog"), import("@tauri-apps/api/window"),
@@ -64,6 +174,7 @@ async function tauriIO(): Promise<FileIO> {
   const readPath = async (path: string): Promise<Picked> => ({ name: baseName(path), path, bytes: new Uint8Array(await invoke<number[]>("read_file", { path })) });
   const io: FileIO = {
     desktop: true,
+    inPlace: true,
     async open(accept) {
       const path = await open({ multiple: false, filters: [{ name: "jockoshop / ANSI art", extensions: accept }] });
       return typeof path === "string" ? readPath(path) : null;
@@ -108,5 +219,7 @@ async function tauriIO(): Promise<FileIO> {
 }
 
 export async function fileIO(): Promise<FileIO> {
-  return "__TAURI_INTERNALS__" in window ? tauriIO() : browserIO;
+  if ("__TAURI_INTERNALS__" in window) return tauriIO();
+  const fs = fsWindow();
+  return fs ? fsAccessIO(fs) : browserIO;
 }
