@@ -15,7 +15,8 @@
     "shadeans": "node scripts/build-shadeans.mjs",
     "smoke": "node scripts/smoke.mjs",
     "desktop": "npm run dev -w @killerdraw/desktop",
-    "desktop:build": "npm run build -w @killerdraw/desktop"
+    "desktop:build": "npm run build -w @killerdraw/desktop",
+    "icon": "node scripts/make-icon.mjs && cd packages/desktop && npx tauri icon ../../docs/icon.png && cp ../../docs/icon.png ../app/public/favicon.png"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.5",
