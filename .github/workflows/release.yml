@@ -1,0 +1,75 @@
+# Builds the desktop app for macOS (Apple silicon + Intel), Windows and Linux
+# when a v* tag is pushed, and attaches the installers to that tag's release.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-14
+            args: --target aarch64-apple-darwin
+          - os: macos-13
+            args: --target x86_64-apple-darwin
+          - os: windows-latest
+            args: ""
+          - os: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown${{ contains(matrix.os, 'macos') && ',aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            packages/desktop/src-tauri
+            packages/shadeans-wasm
+
+      - name: Linux packages Tauri needs
+        if: startsWith(matrix.os, 'ubuntu')
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libxdo-dev libssl-dev libayatana-appindicator3-dev
+
+      - run: npm ci
+
+      # TheDraw fonts ship with Synchronet; only ctrl/tdfonts is fetched
+      - name: TheDraw fonts
+        shell: bash
+        run: |
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/SynchronetBBS/sbbs.git /tmp/sbbs
+          git -C /tmp/sbbs sparse-checkout set ctrl/tdfonts
+          npm run build -w @killerdraw/core
+          node scripts/sync-fonts.mjs /tmp/sbbs/ctrl/tdfonts
+
+      - name: shadeans to WebAssembly
+        run: node scripts/build-shadeans.mjs
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: packages/desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: jockoshop ${{ github.ref_name }}
+          releaseBody: Unsigned builds. macOS shows "unidentified developer" the first time — right-click the app and choose Open.
+          prerelease: true
+          args: ${{ matrix.args }}

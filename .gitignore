@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+packages/app/public/tdfonts/
+packages/shadeans-wasm/vendor/
+packages/shadeans-wasm/target/
+packages/app/public/shadeans.wasm
+smoke-out/
+packages/desktop/src-tauri/target/
+packages/desktop/src-tauri/gen/

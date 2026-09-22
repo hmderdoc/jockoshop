@@ -1,0 +1,18 @@
+[package]
+name = "shadeans-wasm"
+version = "0.1.0"
+edition = "2021"
+description = "shadeans' image-to-ANSI matcher as a WebAssembly module for killerdraw"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# resize only: the browser decodes the image file, so no codecs are compiled in
+image = { version = "0.25", default-features = false }
+
+[profile.release]
+opt-level = 3
+lto = true
+panic = "abort"

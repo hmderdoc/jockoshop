@@ -1,0 +1,72 @@
+{
+  "$schema": "../../../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "jockoshop",
+  "version": "0.1.0",
+  "identifier": "org.hmderdoc.jockoshop",
+  "build": {
+    "frontendDist": "../../app/dist",
+    "devUrl": "http://127.0.0.1:5183",
+    "beforeDevCommand": "npm run dev -w @killerdraw/app",
+    "beforeBuildCommand": "npm run build -w @killerdraw/app"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "jockoshop",
+        "width": 1440,
+        "height": 940,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "fileAssociations": [
+      {
+        "ext": [
+          "kdraw"
+        ],
+        "name": "jockoshop project",
+        "description": "jockoshop layered ANSI project",
+        "role": "Editor",
+        "mimeType": "application/x-jockoshop"
+      },
+      {
+        "ext": [
+          "ans",
+          "asc",
+          "diz",
+          "nfo",
+          "bin",
+          "xb",
+          "xbin",
+          "tnd",
+          "adf",
+          "idf",
+          "avt",
+          "msg"
+        ],
+        "name": "ANSI art",
+        "description": "ANSI / binary text art",
+        "role": "Editor"
+      }
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    }
+  }
+}

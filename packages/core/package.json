@@ -1,0 +1,19 @@
+{
+  "name": "@killerdraw/core",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "killerdraw document model, compositor, cell matcher and file formats. No DOM dependency.",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "fflate": "^0.8.3"
+  }
+}
