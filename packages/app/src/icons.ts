@@ -50,7 +50,7 @@ const ICONS = {
 
 export type IconName = keyof typeof ICONS;
 
-export function icon(name: IconName, size = 18): SVGSVGElement {
+export function icon(name: IconName, size = 20): SVGSVGElement {
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
   svg.setAttribute("width", String(size));

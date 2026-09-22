@@ -147,7 +147,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
   const typeIcon = (l: Layer): SVGSVGElement => icon(l.type === "cells" ? "cells" : l.type === "font" ? "text" : l.type === "image" ? "image" : l.type === "prose" ? "prose" : l.type === "reference" ? "reference" : "group", 15);
 
   const row = (l: Layer, depth: number): HTMLElement[] => {
-    const el = h(`div.layer${l.id === ed.activeId ? ".active" : ""}${l.visible ? "" : ".off"}`, {
+    const el = h(`div.layer${l.id === ed.activeId ? ".active" : ""}${l.visible ? "" : ".off"}${l.type === "reference" ? ".ref" : ""}`, {
       style: `padding-left:${4 + depth * 14}px`, onclick: () => ed.setActive(l.id),
     },
     iconButton(l.visible ? "eye" : "eyeOff", l.visible ? "Hide layer" : "Show layer", {
@@ -155,6 +155,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
     }),
     h("span.kind", { title: l.type === "font" ? "live TheDraw text" : l.type === "image" ? "live image" : l.type === "prose" ? "reflowing prose" : l.type === "reference" ? "reference image (not exported)" : l.type }, typeIcon(l)),
     h("span.name", { title: "Double-click to rename", ondblclick: () => { const name = prompt("Layer name", l.name); if (name) ed.setProps("Rename layer", l, { name }); } }, l.name),
+    l.type === "reference" && h("span.tag", { title: "Reference image: shown to draw from, never part of the picture" }, "ref"),
     l.type !== "group" && l.keys.some((k) => k.enabled) && h("span.tag.key", { title: "Has key rules" }, "key"),
     l.type !== "group" && l.mask?.enabled && h("span.tag.key", { title: "Has a mask" }, "mask"),
     l.type !== "group" && !isIdentityRemap(l.remap) && h("span.tag.key", { title: "Palette swap" }, "pal"),
@@ -166,46 +167,46 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
   const render = (): void => {
     const active = ed.active;
     const count = (layers: readonly Layer[]): number => layers.reduce((n, l) => n + 1 + (l.type === "group" ? count(l.children) : 0), 0);
+    // one "Add layer" button with a labelled menu, instead of a row of tiny icons
+    const addItem = (name: Parameters<typeof icon>[0], label: string, note: string, onclick: () => void): HTMLElement =>
+      h("button", { onclick: () => { addMenu.hidden = true; onclick(); } }, icon(name, 18), h("span.grow", {}, label), h("span.muted", {}, note));
+    const addMenu = h("div.menu.add-menu", { hidden: true },
+      addItem("cells", "Cells layer", "draw on it", () => ed.addLayer(createCellsLayer(`Layer ${count(ed.doc.layers) + 1}`, ed.doc.width, ed.doc.height))),
+      addItem("text", "TheDraw text", "live big-font text", async () => {
+        const pick = await pickFont(ed, lib, "Text");
+        if (!pick) return;
+        const layer = createFontLayer("Text", addFontAsset(ed.doc, pick.entry.file, pick.bytes), "Text", pick.entry.index);
+        refreshFontLayer(ed.doc, layer);
+        ed.addLayer(layer, "Add text layer");
+        ed.chooseTool("text");
+        focusTextField();
+      }),
+      addItem("prose", "Prose", "reflowing text in a frame", () => {
+        const layer = createProseLayer("Prose", Math.min(40, ed.doc.width), Math.min(10, ed.doc.height));
+        layer.fg = []; layer.bg = [];
+        ed.addLayer(layer, "Add prose layer");
+        ed.chooseTool("text");
+        ed.prose.begin(layer);
+      }),
+      addItem("image", "Image…", "converted by shadeans, kept editable", async () => {
+        const file = await pickFile("image/png,image/jpeg,image/gif,image/webp,image/bmp");
+        if (file) await importImage(ed, file.name, new Uint8Array(await file.arrayBuffer()));
+      }),
+      h("div.menu-sep", {}, "not part of the picture"),
+      addItem("reference", "Reference image…", "to draw from; never exported", async () => {
+        const file = await pickFile("image/png,image/jpeg,image/gif,image/webp,image/bmp");
+        if (!file) return;
+        const source = addImageAsset(ed.doc, file.name, new Uint8Array(await file.arrayBuffer()));
+        const size = await imageSize(ed.doc, source);
+        const width = Math.min(ed.doc.width, 40), height = Math.max(1, await rowsForAspect(size.width, size.height, width));
+        const layer: ReferenceLayer = { type: "reference", id: newLayerId(), name: `ref: ${file.name.replace(/\.[^.]+$/, "")}`, visible: true, locked: false, x: 0, y: 0, keys: [], source, width, height, opacity: 0.5 };
+        ed.addLayer(layer, "Add reference");
+        ed.chooseTool("move");
+      }));
+    const addBtn = h("button.add-layer", { title: "Add a layer", onclick: (e: Event) => { e.stopPropagation(); addMenu.hidden = !addMenu.hidden; } }, h("span.plus", {}, "+"), "Add layer", h("span.muted", {}, "▾"));
+    document.addEventListener("click", () => { addMenu.hidden = true; }, { once: true });
     const buttons = h("div.iconbar", {},
-      iconButton("cells", "New cells layer", { plus: true, tip: "a layer you draw on", onclick: () => ed.addLayer(createCellsLayer(`Layer ${count(ed.doc.layers) + 1}`, ed.doc.width, ed.doc.height)) }),
-      iconButton("text", "New text layer", {
-        plus: true, tip: "live TheDraw text", onclick: async () => {
-          const pick = await pickFont(ed, lib, "Text");
-          if (!pick) return;
-          const layer = createFontLayer("Text", addFontAsset(ed.doc, pick.entry.file, pick.bytes), "Text", pick.entry.index);
-          refreshFontLayer(ed.doc, layer);
-          ed.addLayer(layer, "Add text layer");
-          ed.chooseTool("text");
-          focusTextField();
-        },
-      }),
-      iconButton("prose", "New prose layer", {
-        plus: true, tip: "reflowing text in a frame; or drag a frame with the Type tool", onclick: () => {
-          const layer = createProseLayer("Prose", Math.min(40, ed.doc.width), Math.min(10, ed.doc.height));
-          layer.fg = []; layer.bg = [];
-          ed.addLayer(layer, "Add prose layer");
-          ed.chooseTool("text");
-          ed.prose.begin(layer);
-        },
-      }),
-      iconButton("reference", "New reference image", {
-        plus: true, tip: "an image to draw from, over the canvas — never part of the picture", onclick: async () => {
-          const file = await pickFile("image/png,image/jpeg,image/gif,image/webp,image/bmp");
-          if (!file) return;
-          const source = addImageAsset(ed.doc, file.name, new Uint8Array(await file.arrayBuffer()));
-          const size = await imageSize(ed.doc, source);
-          const width = Math.min(ed.doc.width, 40), height = Math.max(1, await rowsForAspect(size.width, size.height, width));
-          const layer: ReferenceLayer = { type: "reference", id: newLayerId(), name: `ref: ${file.name.replace(/\.[^.]+$/, "")}`, visible: true, locked: false, x: 0, y: 0, keys: [], source, width, height, opacity: 0.5 };
-          ed.addLayer(layer, "Add reference");
-          ed.chooseTool("move");
-        },
-      }),
-      iconButton("image", "New image layer", {
-        plus: true, tip: "an image converted by shadeans, kept editable", onclick: async () => {
-          const file = await pickFile("image/png,image/jpeg,image/gif,image/webp,image/bmp");
-          if (file) await importImage(ed, file.name, new Uint8Array(await file.arrayBuffer()));
-        },
-      }),
+      h("span.menu-anchor", {}, addBtn, addMenu),
       h("span.grow"),
       iconButton("up", "Move layer up", { disabled: !active, onclick: () => active && ed.moveLayer(active.id, 1) }),
       iconButton("down", "Move layer down", { disabled: !active, onclick: () => active && ed.moveLayer(active.id, -1) }),

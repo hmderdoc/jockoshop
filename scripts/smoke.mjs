@@ -53,6 +53,11 @@ async function drag(from, to, opts = {}) {
   await page.mouse.move(b.x, b.y, { steps: 12 });
   await page.mouse.up({ button: opts.button ?? "left" });
 }
+/** Add a layer through the "Add layer" menu by the item's label. */
+const addLayerVia = async (label) => {
+  await kd(() => document.querySelector(".add-layer").click());
+  await kd((label) => { const b = [...document.querySelectorAll(".add-menu button")].find((b) => b.textContent.startsWith(label)); if (!b) throw new Error(`no add item ${label}`); b.click(); }, label);
+};
 /** Click a button by its label, inside one panel: several panels have a "delete". */
 const clickButton = async (text, scope = "body") => {
   const state = await kd((text, scope) => {
@@ -93,7 +98,7 @@ const gap = await kd(() => {   // a cell inside the text block that the font nev
 check("gaps inside the live text show the backdrop", gap !== null && gap.owner === "backdrop", JSON.stringify(gap));
 
 // --- half-block painting on a new layer
-await clickButton("New cells layer", ".layers");
+await addLayerVia("Cells layer");
 await page.keyboard.press("h");
 await kd(() => { window.kd.ed.fg = 12; window.kd.ed.bg = 10; window.kd.ed.emit("ui"); });
 await drag([10, 30], [40, 30], { half: true });                       // upper halves of row 15, red
@@ -197,7 +202,7 @@ writeFileSync(disc, png(200, 200, (x, y) => { const d = Math.hypot(x - 100, y - 
 const mod = async (keys, fn) => { for (const k of keys) await page.keyboard.down(k); await fn(); for (const k of [...keys].reverse()) await page.keyboard.up(k); };
 const addImage = async (file) => {
   const before = await kd(() => window.kd.ed.doc.layers.length);
-  const [chooser] = await Promise.all([page.waitForFileChooser(), clickButton("New image layer", ".layers")]);
+  const [chooser] = await Promise.all([page.waitForFileChooser(), addLayerVia("Image")]);
   await chooser.accept([file]);
   await page.waitForFunction((n) => window.kd.ed.doc.layers.length > n, {}, before);
   return kd(() => { const e = window.kd.ed, l = e.active; return { type: l.type, w: l.cache.width, h: l.cache.height, source: l.source, asset: e.doc.assets.get(l.source).length }; });
@@ -336,7 +341,7 @@ const selHas = (x, y) => kd((x, y) => !!window.kd.ed.selection?.has(x, y), x, y)
 const layerNames = () => kd(() => window.kd.ed.doc.layers.map((l) => l.name));
 const owner = (x, y) => kd((x, y) => { const c = window.kd.ed.comp; const o = c.owner[c.grid.index(x, y)]; return o < 0 ? null : c.layers[o].name; }, x, y);
 
-await clickButton("New cells layer", ".layers");
+await addLayerVia("Cells layer");
 await page.keyboard.press("m");
 await drag([5, 14], [10, 17]);
 check("marquee selects a rectangle", await selCount() === 24 && await selHas(5, 14) && !(await selHas(11, 14)), `${await selCount()} cells`);
@@ -653,7 +658,7 @@ check("the SAUCE editor sets title, author, group and comments, undoably", sauce
 const withSauce = await kd(async () => { const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts"); const { ed } = window.kd; return core.parseAnsi(core.encodeAnsi(ed.comp.grid, { iceColors: false, sauce: ed.doc.sauce })).sauce.title; });
 check("…and it goes out in the .ans", withSauce === "My Piece");
 
-const [refChooser] = await Promise.all([page.waitForFileChooser(), clickButton("New reference image", ".layers")]);
+const [refChooser] = await Promise.all([page.waitForFileChooser(), addLayerVia("Reference image")]);
 await refChooser.accept([photo]);
 await page.waitForFunction(() => window.kd.ed.active?.type === "reference");
 // the image decodes asynchronously before it can be drawn
