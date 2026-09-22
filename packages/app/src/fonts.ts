@@ -59,7 +59,7 @@ export function previewCanvas(ed: Editor, font: TdfFont, text: string): HTMLCanv
 export function pickFont(ed: Editor, lib: FontLibrary, sample: string): Promise<{ entry: FontEntry; bytes: Uint8Array } | null> {
   return new Promise((resolve) => {
     let chosen: FontEntry | null = null;
-    const list = h("div.font-list"), preview = h("div.font-preview-box");
+    const list = h("div.font-list", { tabindex: 0 }), preview = h("div.font-preview-box");   // focusable, so the arrows work after a click
     const filter = h("input", { type: "search", placeholder: "filter by name…", oninput: () => fill() });
     const maxH = h("input", { type: "number", min: 1, max: 40, placeholder: "max height", style: "width:96px", oninput: () => fill() });
     const count = h("span.muted");
@@ -76,13 +76,23 @@ export function pickFont(ed: Editor, lib: FontLibrary, sample: string): Promise<
       } catch (err) { preview.replaceChildren(String(err)); }
     };
 
+    let shown: FontEntry[] = [];
     const fill = (): void => {
       const q = filter.value.trim().toLowerCase(), mh = Number(maxH.value) || Infinity;
       const hits = lib.entries.filter((e) => e.height <= mh && (!q || e.name.toLowerCase().includes(q) || e.file.toLowerCase().includes(q)));
       count.textContent = `${hits.length} of ${lib.entries.length} fonts${hits.length > 300 ? " (first 300 shown)" : ""}`;
-      list.replaceChildren(...hits.slice(0, 300).map((e) => h("div.font-item", {
-        "data-key": `${e.file}#${e.index}`, onclick: () => void show(e), ondblclick: () => void accept(),
+      shown = hits.slice(0, 300);
+      list.replaceChildren(...shown.map((e) => h("div.font-item", {
+        "data-key": `${e.file}#${e.index}`, onclick: () => { list.focus(); void show(e); }, ondblclick: () => void accept(),
       }, h("span", {}, e.name || e.file), h("span.muted", {}, `${e.file} · ${e.type} · ${e.height} rows`))));
+    };
+    /** Up/Down step through the list (from the filter box or the list itself), previewing as they go. */
+    const step = (dir: 1 | -1): void => {
+      if (!shown.length) return;
+      const i = chosen ? shown.indexOf(chosen) : -1;
+      const next = shown[Math.max(0, Math.min(shown.length - 1, i < 0 ? (dir > 0 ? 0 : shown.length - 1) : i + dir))];
+      void show(next);
+      list.querySelector(`[data-key="${CSS.escape(`${next.file}#${next.index}`)}"]`)?.scrollIntoView({ block: "nearest" });
     };
 
     const accept = async (): Promise<void> => { if (chosen) close({ entry: chosen, bytes: await lib.bytes(chosen.file) }); };
@@ -91,7 +101,16 @@ export function pickFont(ed: Editor, lib: FontLibrary, sample: string): Promise<
       ? [h("div.row", {}, filter, maxH, count), list, preview]
       : [h("p", {}, "No TheDraw fonts found. Run ", h("code", {}, "node scripts/sync-fonts.mjs [path/to/tdfonts]"),
           " to copy them from a Synchronet install (ctrl/tdfonts), then reload.")];
-    const backdrop = h("div.backdrop", { onclick: (e: Event) => { if (e.target === backdrop) close(null); } },
+    const backdrop = h("div.backdrop", {
+      onclick: (e: Event) => { if (e.target === backdrop) close(null); },
+      onkeydown: (e: KeyboardEvent) => {
+        const inNumber = e.target instanceof HTMLInputElement && e.target.type === "number";
+        if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !inNumber) { e.preventDefault(); step(e.key === "ArrowDown" ? 1 : -1); }
+        else if (e.key === "Enter" && chosen && !inNumber) { e.preventDefault(); void accept(); }
+        else if (e.key === "Escape") { e.preventDefault(); close(null); }
+        e.stopPropagation();   // the editor's own shortcuts stay out of the dialog
+      },
+    },
       h("div.dialog", {}, h("h3", {}, "TheDraw font"), ...body,
         h("div.row.end", {}, h("button", { onclick: () => close(null) }, "Cancel"),
           h("button.primary", { onclick: () => void accept() }, "Use font"))));

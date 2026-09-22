@@ -719,6 +719,24 @@ await kd(() => { const s = [...document.querySelectorAll(".layers label.slider")
 await new Promise((r) => setTimeout(r, 900));
 await shot("17-opacity");
 
+// font picker: arrow keys step through the fonts, previewing each
+await addLayerVia("TheDraw text");
+await page.waitForSelector(".font-list .font-item");
+await page.type(".dialog input[type=search]", "cyber");
+const layersBeforePick = await kd(() => window.kd.ed.doc.layers.length);
+await page.keyboard.press("ArrowDown");
+await page.keyboard.press("ArrowDown");
+await page.waitForSelector(".font-preview-box canvas", { timeout: 5000 }).catch(() => {});   // the font file is fetched first
+const stepped = await kd(() => ({ sel: document.querySelector(".font-item.selected")?.textContent.split("cyb")[0], idx: [...document.querySelectorAll(".font-item")].findIndex((i) => i.classList.contains("selected")), preview: !!document.querySelector(".font-preview-box canvas") }));
+check("in the font picker, Down from the filter box steps through the list and previews", stepped.idx === 1 && stepped.preview, JSON.stringify(stepped));
+await kd(() => document.querySelectorAll(".font-item")[5].click());
+await page.keyboard.press("ArrowUp");
+check("…and after clicking an item the arrows still work", await kd(() => [...document.querySelectorAll(".font-item")].findIndex((i) => i.classList.contains("selected"))) === 4);
+await page.keyboard.press("Enter");
+await page.waitForFunction((n) => window.kd.ed.doc.layers.length > n, { timeout: 5000 }, layersBeforePick);
+check("Enter picks the font and adds the text layer", await kd(() => { const l = window.kd.ed.active; return l.type === "font" && l.runs[0].font.toLowerCase().includes("cyb"); }));
+await page.keyboard.press("Escape");
+
 check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 14 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
 await shot("12-ui");
 
