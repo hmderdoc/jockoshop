@@ -184,7 +184,7 @@ async function start(): Promise<void> {
   const export3d = (): void => {
     const comp = ed.comp, plan = planDepth(comp);
     download(`${baseName()}-3d.ans`, encodeAnsi(comp.grid, { ...exportOpts(), depth: plan }));
-    ed.setStatus(`Exported with ${plan.levels.length} depth layer(s)${plan.merged ? "; more than 16 depths were merged" : ""}${plan.front.length ? `; in front of the screen (needs the pop-out patch on the 3dBBS side, else shown at the screen): ${plan.front.join(", ")}` : ""}.`);
+    ed.setStatus(`Exported with ${plan.levels.length} depth layer(s)${plan.merged ? "; more than 16 depths were merged" : ""}${plan.front.length ? `; in front of the screen (3dBBS 0.4; older shows them at the screen): ${plan.front.join(", ")}` : ""}.`);
   };
   // export is one button with a small menu, instead of three buttons
   const item = (label: string, note: string, ext: string, make: () => Uint8Array, title?: string): HTMLElement =>

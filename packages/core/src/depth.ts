@@ -5,9 +5,9 @@
  *
  * On the wire (protocol 0.3) `CSI = Ps ; Pd * z` carries an unsigned distance
  * BEHIND the glass, Pd 0-1800; the device clamps anything else to the glass.
- * Front depths are written as `CSI = Ps ; Pd + z` — a proposed extension a
- * 0.3 client treats as a harmless layer select (so it shows that layer at the
- * glass), and a patched client reads as Pd centi-units in front.
+ * Front depths are written as `CSI = Ps ; Pd + z` (protocol 0.4: Pd
+ * centi-units in front of the glass); a 0.3 client treats it as a harmless
+ * layer select and shows that layer at the glass.
  *
  * What the numbers look like on the device (3dBBS authoring guide, and
  * fshell_ts in practice): under ~30 reads as barely-there relief, 100+ as clear

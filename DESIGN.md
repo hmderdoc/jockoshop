@@ -187,10 +187,11 @@ The wire parameter `Pd` is an unsigned distance *behind* the glass, so export
 writes `Pd = -depth`. Verified against the 3dBBS source (2026-09-22):
 `termSetLayerDepth` takes `Pd / 100` world units and `scene3dTextShifts` uses
 `(1/2 − 1/(2 + depth))` — the preview uses the same formula. Typical values
-from fshell_ts: 300 for a backdrop, 135 for panels. Pop-out: protocol 0.3
-clamps negative depth, so front depths go out as `CSI = Ps ; Pd + z`, which a
-0.3 client parses as a layer select (harmless: an explicit `CSI = 0 z` follows)
-and a patched client (`docs/3dbbs-front-depth.patch`) reads as in-front.
+from fshell_ts: 300 for a backdrop, 135 for panels. Pop-out: front depths go
+out as `CSI = Ps ; Pd + z`, 3dBBS protocol 0.4 (fixed in 3dBBS itself on
+2026-09-22: parser, both clamps, `APC_3DS_MINOR` 4). A 0.3 client parses the
+form as a layer select — harmless, an explicit `CSI = 0 z` follows — and shows
+the layer at the glass.
 
 **Depth export** flattens the stack; each surviving cell is tagged with the
 depth of the layer that supplied its glyph. At most 16 distinct depths —

@@ -267,7 +267,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
               sel.value = active.textWrap ?? "auto";
               return sel;
             })())),
-          (active.depth ?? 0) > 0 && h("p.hint", {}, "Popping out of the screen. Exported as the `+ z` extension: a 3dBBS with the pop-out patch shows it in front; an unpatched (0.3) one shows it at the glass."),
+          (active.depth ?? 0) > 0 && h("p.hint", {}, "Popping out of the screen (3dBBS protocol 0.4; a 0.3 client shows it at the glass)."),
           (() => {
             const cur = active.opacity ?? 1;
             let from: number | undefined | null = null;
