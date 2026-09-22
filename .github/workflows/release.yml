@@ -72,4 +72,5 @@ jobs:
           releaseName: jockoshop ${{ github.ref_name }}
           releaseBody: Unsigned builds. macOS shows "unidentified developer" the first time — right-click the app and choose Open.
           prerelease: true
+          includeUpdaterJson: false
           args: ${{ matrix.args }}
