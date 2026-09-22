@@ -66,6 +66,16 @@ describe("depth plan", () => {
     expect(plan.merged).toBe(false);
   });
 
+  it("cells nobody draws stay at the screen even when a pop-out layer takes protocol layer 0", () => {
+    const doc = createDocument(4, 1);
+    const pop = doc.layers[0] as CellsLayer;
+    pop.grid.set(0, 0, { glyph: 219, fg: RED, bg: BLACK });
+    pop.depth = 120;
+    const plan = planDepth(composite(doc));
+    expect(plan.levels).toEqual([-120, 0]);
+    expect(Array.from(plan.cellLevel)).toEqual([0, 1, 1, 1]);
+  });
+
   it("merges the closest depths when there are more than 16, keeping the screen plane", () => {
     const doc = createDocument(20, 1);
     doc.layers = [];

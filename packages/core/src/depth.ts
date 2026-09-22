@@ -62,10 +62,10 @@ export function planDepth(comp: Composite): DepthPlan {
     levels.splice(at, 2, mid);
   }
   levels = [...new Set(levels)].sort((a, b) => a - b);
-  const cellLevel = new Uint8Array(comp.owner.length);
+  const cellLevel = new Uint8Array(comp.owner.length), glass = levels.indexOf(0);   // the screen plane is not index 0 when a layer pops out
   for (let i = 0; i < cellLevel.length; i++) {
     const o = comp.owner[i];
-    cellLevel[i] = o < 0 ? 0 : levels.indexOf(remap.get(ownerPd[o])!);
+    cellLevel[i] = o < 0 ? glass : levels.indexOf(remap.get(ownerPd[o])!);
   }
   return { levels, cellLevel, front, merged };
 }
