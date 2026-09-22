@@ -234,25 +234,32 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
       panels.push({
         el: panel("layer", "Layer", true, "3D depth for 3dBBS, in centi-world-units: glass in the middle, into the screen on the left (down to −1800), out of it on the right (to +180). Pick a 3D mode in the preview to see it.",
           (() => {
-            // in ◄──────── glass ────────► out: the left half spans the useful "behind" range, the right the pop-out range
+            // A linear slider, −600 (into the screen) … +180 (pop-out). The markers are icons placed at
+            // the true fraction of the track: the glass icon sits exactly where the slider's zero is.
+            const MIN = -600, MAX = 180;
+            const at = (d: number): string => `${((d - MIN) / (MAX - MIN)) * 100}%`;
             const cur = active.depth ?? 0;
             let from: number | undefined | null = null;
-            const readout = h("span.muted", {}, cur === 0 ? "at the glass" : cur < 0 ? `${-cur} in` : `${cur} out`);
+            const label = (d: number): string => (d === 0 ? "at the glass" : d < 0 ? `${-d} in` : `${d} out`);
+            const readout = h("span.muted", {}, label(cur));
             const input = h("input.depth", {
-              type: "range", min: -600, max: 180, step: 5, value: String(Math.max(-600, Math.min(180, cur))),
+              type: "range", min: MIN, max: MAX, step: 5, value: String(Math.max(MIN, Math.min(MAX, cur))),
               title: "3D depth: drag left to sink the layer into the screen, right to pop it out. Under ~30 is barely visible on the device; 100+ reads clearly; backdrops sit around 300 in.",
               oninput: () => {
                 from ??= active.depth;
                 const v = Number(input.value);
                 active.depth = v || undefined;
-                readout.textContent = v === 0 ? "at the glass" : v < 0 ? `${-v} in` : `${v} out`;
+                readout.textContent = label(v);
                 ed.emit("pixels");   // the preview re-plans depth from the layers
               },
               onchange: () => { if (from !== null) { const to = active.depth; active.depth = from; ed.setProps("Layer depth", active, { depth: to } as Partial<ContentLayer>); from = null; } },
             });
+            const marker = (name: Parameters<typeof icon>[0], d: number, tip: string): HTMLElement =>
+              h("span.depth-mark", { style: `left:${at(d)}`, title: tip }, icon(name, 14));
             return h("div.depth-row", {},
-              h("div.depth-scale", {}, h("span", {}, "in"), h("span", {}, "glass"), h("span", {}, "out")),
-              h("div.row", {}, input, readout));
+              h("div.depth-track", {}, input,
+                marker("depthIn", MIN, "into the screen (to 600)"), marker("depthGlass", 0, "at the glass"), marker("depthOut", MAX, "out of the screen (to 180)")),
+              h("div.row", {}, h("span.muted", {}, "3D depth"), h("span.grow"), readout));
           })(),
           h("div.row", {},
             field("exact", liveProp(ed, active, "depth", "Layer depth", active.depth, { min: -1800, max: 180, placeholder: "0", width: 72 }, (v) => v || undefined)),

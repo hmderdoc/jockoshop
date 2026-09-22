@@ -170,6 +170,9 @@ h4:first-child { margin-top: 0; }
 .layer.ref .name { font-style: italic; color: var(--muted); }
 .layer.ref.active .name { color: #fff; }
 .depth-row { margin: 4px 0; }
-.depth-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); padding: 0 2px; }
-.depth-row .row { align-items: center; }
-input.depth { flex: 1; padding: 0; accent-color: var(--hot); }
+.depth-track { position: relative; padding: 18px 0 2px; }
+input.depth { display: block; width: 100%; padding: 0; margin: 0; accent-color: var(--hot); }
+/* markers sit above the track at the exact fraction of its width; the thumb's centre at that value lands under them */
+.depth-mark { position: absolute; top: 0; transform: translateX(-50%); color: var(--muted); display: inline-flex; }
+.depth-mark:nth-of-type(2) { color: var(--hot); }
+.depth-row .row { align-items: center; margin-top: 2px; }
