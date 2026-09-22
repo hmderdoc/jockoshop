@@ -1,8 +1,8 @@
 import {
   CH_BG, CH_FG, CH_GLYPH, type CellGrid, type CellsLayer, type Color, type Command, type ContentLayer, GlyphClass,
   type FontLayer, GridEdit, type ImageLayer, type ProseLayer, type Rect, type SelectMode, Selection, cellPatchCommand,
-  colorsEqual, cp437Encode, createProseLayer, groupCommand, isHigh, layerGrid, refreshFontLayer, refreshProseLayer,
-  selectWand,
+  type ReferenceLayer, colorsEqual, cp437Encode, createProseLayer, ellipseCells, groupCommand, isHigh, layerGrid, layerSize,
+  mirrorGlyph, refreshFontLayer, refreshProseLayer, selectWand,
 } from "@killerdraw/core";
 import type { Editor, ToolId } from "./editor.js";
 import { commitImage, scheduleImageRefresh, snapshotImage } from "./shadeans.js";
@@ -50,12 +50,12 @@ export type Handle = "corner" | "right" | "bottom";
 export function handleAt(ed: Editor, x: number, y: number): Handle | null {
   const l = ed.active;
   if (!l || l.type === "group" || l.type === "cells") return null;
-  const g = l.cache;
+  const g = layerSize(l);
   if (!g || l.locked) return null;
   const lx = x - l.x, ly = y - l.y;
   if (lx < 0 || ly < 0 || lx >= g.width || ly >= g.height) return null;
   const atRight = lx === g.width - 1, atBottom = ly === g.height - 1;
-  if (l.type === "image" || l.type === "prose") return atRight && atBottom ? "corner" : atRight ? "right" : atBottom ? "bottom" : null;
+  if (l.type === "image" || l.type === "prose" || l.type === "reference") return atRight && atBottom ? "corner" : atRight ? "right" : atBottom ? "bottom" : null;
   return atRight ? "right" : null;
 }
 
@@ -127,11 +127,33 @@ export class Stroke {
     return layer ? new Stroke(ed, layer) : null;
   }
 
-  /** Visit a document cell; `fn` gets layer-local coordinates. Cells off the canvas are skipped. */
+  /**
+   * Visit a document cell; `fn` gets layer-local coordinates. Cells off the
+   * canvas are skipped. In mirror mode the stroke is repeated across the
+   * canvas centre, with glyphs that have a mirror image swapped (▌↔▐, ┌↔┐ …).
+   */
   at(x: number, y: number, fn: (lx: number, ly: number) => void): void {
+    this.one(x, y, fn);
+    const ed = this.ed, W = ed.doc.width, H = ed.doc.height;
+    if (ed.mirrorX) this.one(W - 1 - x, y, fn, "x");
+    if (ed.mirrorY) this.one(x, H - 1 - y, fn, "y");
+    if (ed.mirrorX && ed.mirrorY) this.one(W - 1 - x, H - 1 - y, fn, "xy");
+  }
+
+  private one(x: number, y: number, fn: (lx: number, ly: number) => void, mirrored?: "x" | "y" | "xy"): void {
     if (x < 0 || y < 0 || x >= this.ed.doc.width || y >= this.ed.doc.height) return;
     if (this.ed.selection && !this.ed.selection.has(x, y)) return;   // a selection confines every edit
-    fn(x - this.layer.x, y - this.layer.y);
+    const lx = x - this.layer.x, ly = y - this.layer.y;
+    fn(lx, ly);
+    if (mirrored && this.layer.grid.inBounds(lx, ly)) {
+      const i = this.layer.grid.index(lx, ly);
+      if (this.layer.grid.present[i] & CH_GLYPH) {
+        let g = this.layer.grid.glyph[i];
+        if (mirrored !== "y") g = mirrorGlyph(g);
+        if (mirrored !== "x") g = g === 223 ? 220 : g === 220 ? 223 : g;
+        this.edit.set(lx, ly, { glyph: g });
+      }
+    }
     const d = this.dirty;
     if (!d) this.dirty = { x, y, width: 1, height: 1 };
     else {
@@ -240,7 +262,7 @@ export function createTools(ed: Editor): Tool[] {
 
   // move tool state
   let moving: { layer: { x: number; y: number }; sx: number; sy: number; ox: number; oy: number } | null = null;
-  let resizing: { handle: Handle; layer: ImageLayer | FontLayer | ProseLayer; before: unknown } | null = null;
+  let resizing: { handle: Handle; layer: ImageLayer | FontLayer | ProseLayer | ReferenceLayer; before: unknown } | null = null;
   let framing: { x: number; y: number; cur: Pointer } | null = null;   // Type tool: dragging out a new prose frame
   let selecting = false;                                                 // Type tool: dragging over prose selects text
   // text tool state
@@ -265,6 +287,7 @@ export function createTools(ed: Editor): Tool[] {
       (s, x, y) => s.at(x, y, (lx, ly) => s.edit.clear(lx, ly))),
     shape("line", "Line", "l", "Drag a line of the brush character.", (a, b) => lineCells(a.x, a.y, b.x, b.y)),
     shape("rect", "Rectangle", "r", "Drag a rectangle. Hold Shift to fill it.", rectCells),
+    shape("ellipse", "Ellipse", "o", "Drag an ellipse. Hold Shift to fill it.", (a, b) => ellipseCells(a.x, a.y, b.x, b.y, b.shift)),
     {
       id: "fill", label: "Fill", key: "f", hint: "Flood-fill connected identical cells on the active layer with the brush.",
       down(p) {
@@ -305,7 +328,7 @@ export function createTools(ed: Editor): Tool[] {
         const handle = handleAt(ed, p.x, p.y);
         if (handle && l.type === "image") { resizing = { handle, layer: l, before: snapshotImage(l) }; return; }
         if (handle && l.type === "font") { resizing = { handle, layer: l, before: l.wrapWidth }; return; }
-        if (handle && l.type === "prose") { resizing = { handle, layer: l, before: { width: l.width, height: l.height } }; return; }
+        if (handle && (l.type === "prose" || l.type === "reference")) { resizing = { handle, layer: l, before: { width: l.width, height: l.height } }; return; }
         moving = { layer: l, sx: p.x, sy: p.y, ox: l.x, oy: l.y };
       },
       move(p) {
@@ -320,6 +343,11 @@ export function createTools(ed: Editor): Tool[] {
             if (handle !== "bottom") layer.width = w;
             if (handle !== "right") layer.height = hgt;
             refreshProseLayer(ed.doc, layer, ed.glyphs);
+            ed.recomposite();
+          } else if (layer.type === "reference") {
+            // the corner keeps the image's aspect in cells (a cell is 8x16, so height = width / 2 * image ratio)
+            if (handle === "corner") { layer.width = w; layer.height = Math.max(1, Math.round(w * (layer.height / Math.max(1, (resizing.before as { width: number }).width)))); }
+            else if (handle === "right") layer.width = w; else layer.height = hgt;
             ed.recomposite();
           } else {
             layer.wrapWidth = w;
@@ -340,11 +368,12 @@ export function createTools(ed: Editor): Tool[] {
           const { layer, before } = resizing;
           resizing = null;
           if (layer.type === "image") commitImage(ed, layer, "Resize image", before as ReturnType<typeof snapshotImage>, true);
-          else if (layer.type === "prose") {
+          else if (layer.type === "prose" || layer.type === "reference") {
             const from = before as { width: number; height: number }, to = { width: layer.width, height: layer.height };
             if (from.width !== to.width || from.height !== to.height) {
               layer.width = from.width; layer.height = from.height;
-              ed.setProps("Resize text frame", layer, to, () => { refreshProseLayer(ed.doc, layer, ed.glyphs); });
+              if (layer.type === "prose") ed.setProps("Resize text frame", layer, to, () => { refreshProseLayer(ed.doc, layer, ed.glyphs); });
+              else ed.setProps("Resize reference", layer, to);
             }
           } else {
             const from = before as number | undefined, to = layer.wrapWidth;

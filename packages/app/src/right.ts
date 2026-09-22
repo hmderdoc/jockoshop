@@ -3,15 +3,17 @@
  * the layer stack, and the active layer's properties.
  */
 import {
-  type CellsLayer, type ContentLayer, type DepthPlan, type Layer, type Raster, addFontAsset, cloneLayer,
-  createCellsLayer, createFontLayer, createProseLayer, createRaster, isIdentityRemap, layerGrid, planDepth,
+  type CellsLayer, type ContentLayer, type DepthPlan, type Layer, type Raster, type ReferenceLayer, addFontAsset,
+  addImageAsset, cloneLayer, createCellsLayer, createFontLayer, createImageLayer, createProseLayer, createRaster,
+  isIdentityRemap, layerGrid, newLayerId, planDepth,
   refreshFontLayer, renderDepthView,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 import { type FontLibrary, pickFont } from "./fonts.js";
 import { icon, iconButton } from "./icons.js";
 import { type Panel, imagePanel, keyRulesPanel, liveProp, maskPanel, paletteSwapPanel, panel } from "./sections.js";
-import { importImage } from "./shadeans.js";
+import { scaleDialog } from "./dialogs.js";
+import { imageSize, importImage, refreshImageLayer, rowsForAspect } from "./shadeans.js";
 import { focusTextField } from "./tools.js";
 import { field, h, pickFile } from "./ui.js";
 import type { CanvasView } from "./view.js";
@@ -132,7 +134,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
 
   const rasterize = (layer: ContentLayer): void => {
     const grid = layerGrid(layer);
-    if (layer.type === "cells" || !grid) return;
+    if (layer.type === "cells" || layer.type === "reference" || !grid) return;
     const flat: CellsLayer = { ...createCellsLayer(layer.name, 1, 1), id: layer.id, x: layer.x, y: layer.y, keys: layer.keys, mask: layer.mask, remap: layer.remap, depth: layer.depth, visible: layer.visible, grid: grid.clone() };
     const at = ed.locate(layer.id)!;
     ed.run({
@@ -142,7 +144,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
     });
   };
 
-  const typeIcon = (l: Layer): SVGSVGElement => icon(l.type === "cells" ? "cells" : l.type === "font" ? "text" : l.type === "image" ? "image" : l.type === "prose" ? "prose" : "group", 15);
+  const typeIcon = (l: Layer): SVGSVGElement => icon(l.type === "cells" ? "cells" : l.type === "font" ? "text" : l.type === "image" ? "image" : l.type === "prose" ? "prose" : l.type === "reference" ? "reference" : "group", 15);
 
   const row = (l: Layer, depth: number): HTMLElement[] => {
     const el = h(`div.layer${l.id === ed.activeId ? ".active" : ""}${l.visible ? "" : ".off"}`, {
@@ -151,7 +153,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
     iconButton(l.visible ? "eye" : "eyeOff", l.visible ? "Hide layer" : "Show layer", {
       class: "bare", onclick: (e) => { e.stopPropagation(); ed.setProps(l.visible ? "Hide layer" : "Show layer", l, { visible: !l.visible }); },
     }),
-    h("span.kind", { title: l.type === "font" ? "live TheDraw text" : l.type === "image" ? "live image" : l.type === "prose" ? "reflowing prose" : l.type }, typeIcon(l)),
+    h("span.kind", { title: l.type === "font" ? "live TheDraw text" : l.type === "image" ? "live image" : l.type === "prose" ? "reflowing prose" : l.type === "reference" ? "reference image (not exported)" : l.type }, typeIcon(l)),
     h("span.name", { title: "Double-click to rename", ondblclick: () => { const name = prompt("Layer name", l.name); if (name) ed.setProps("Rename layer", l, { name }); } }, l.name),
     l.type !== "group" && l.keys.some((k) => k.enabled) && h("span.tag.key", { title: "Has key rules" }, "key"),
     l.type !== "group" && l.mask?.enabled && h("span.tag.key", { title: "Has a mask" }, "mask"),
@@ -186,6 +188,18 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
           ed.prose.begin(layer);
         },
       }),
+      iconButton("reference", "New reference image", {
+        plus: true, tip: "an image to draw from, over the canvas — never part of the picture", onclick: async () => {
+          const file = await pickFile("image/png,image/jpeg,image/gif,image/webp,image/bmp");
+          if (!file) return;
+          const source = addImageAsset(ed.doc, file.name, new Uint8Array(await file.arrayBuffer()));
+          const size = await imageSize(ed.doc, source);
+          const width = Math.min(ed.doc.width, 40), height = Math.max(1, await rowsForAspect(size.width, size.height, width));
+          const layer: ReferenceLayer = { type: "reference", id: newLayerId(), name: `ref: ${file.name.replace(/\.[^.]+$/, "")}`, visible: true, locked: false, x: 0, y: 0, keys: [], source, width, height, opacity: 0.5 };
+          ed.addLayer(layer, "Add reference");
+          ed.chooseTool("move");
+        },
+      }),
       iconButton("image", "New image layer", {
         plus: true, tip: "an image converted by shadeans, kept editable", onclick: async () => {
           const file = await pickFile("image/png,image/jpeg,image/gif,image/webp,image/bmp");
@@ -199,7 +213,22 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
       iconButton("trash", "Delete layer", { disabled: !active, onclick: () => active && ed.removeLayer(active.id) }));
 
     const panels: Panel[] = [];
-    if (active && active.type !== "group") {
+    if (active?.type === "reference") {
+      const r = active;
+      panels.push({ el: panel("reference", "Reference image", true, "Something to draw from. It is shown over the canvas at this opacity and never exported.",
+        h("label.slider", {}, h("span", {}, "opacity"), h("input", { type: "range", min: 0.05, max: 1, step: 0.05, value: String(r.opacity), oninput: (e: Event) => { r.opacity = Number((e.target as HTMLInputElement).value); ed.emit("ui"); } }), h("span.muted", {}, `${Math.round(r.opacity * 100)}%`)),
+        h("p.hint", {}, "Move (V): drag to place, drag the corner or edges to resize."),
+        h("div.row", {}, h("button", {
+          title: "Convert it with shadeans into a real image layer of the same size and position",
+          onclick: async () => {
+            const layer = createImageLayer(r.name.replace(/^ref: /, ""), r.source, r.width);
+            layer.x = r.x; layer.y = r.y; layer.rows = r.height;
+            try { await refreshImageLayer(ed.doc, layer); } catch (err) { ed.setStatus(`Could not convert: ${(err as Error).message}`); return; }
+            const at = ed.locate(r.id)!;
+            ed.run({ label: "Reference to image layer", redo: () => { at.list[at.list.indexOf(r)] = layer; ed.activeId = layer.id; }, undo: () => { at.list[at.list.indexOf(layer)] = r; ed.activeId = r.id; } });
+          },
+        }, "convert to image layer"))) });
+    } else if (active && active.type !== "group") {
       const live = active.type !== "cells";
       panels.push({
         el: panel("layer", "Layer", true, "Depth is for 3dBBS: 0 = at the screen, negative = behind it (to −1800), positive = in front. Pick a 3D mode in the preview to see it.",
@@ -208,6 +237,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
             active.type === "font" && h("button", { title: "Font, text and spacing are under the Type tool", onclick: () => { ed.chooseTool("text"); focusTextField(); } }, "edit text (T)"),
             active.type === "prose" && h("button", { title: "Edit the text on the canvas", onclick: () => { ed.chooseTool("text"); ed.prose.begin(active); } }, "edit text (T)"),
             live && h("button", { title: "Turn into plain cells you can draw on. It stops being live.", onclick: () => rasterize(active) }, "rasterize"),
+            active.type === "cells" && h("button", { title: "Scale or flip the layer's cells", onclick: () => scaleDialog(ed, active) }, "scale…"),
             active.type !== "prose" && field("prose flows around", (() => {
               const sel = h("select", { title: "Whether prose layers wrap around this layer's content. Auto: a layer covering most of the text frame is a background and is written over; anything smaller is an obstacle.",
                 onchange: () => ed.setProps("Text wrap", active, { textWrap: sel.value === "auto" ? undefined : sel.value as "always" | "never" }) },

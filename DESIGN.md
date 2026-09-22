@@ -219,8 +219,10 @@ Order is flexible; everything here is in scope.
    selections (marquee, lasso, magic wand, select-by-match; add/subtract/intersect; fill, delete, copy, cut,
    paste-as-layer; drawing confined to the selection), pencil, half-block brush, eraser, line, rectangle, fill,
    pick-up, type, move layer, canvas resize at any edge, undo/redo, open/import/save/export.
-   Not yet: transforming a selection in place (move/flip/rotate), ellipse, shade/colorize brushes as their own
-   tools, shifter, mirror mode, reference overlay, F-key character sets beyond F1-F4, SAUCE editor, 9px toggle,
+   Also: ellipse, mirror mode (glyph-aware), F-key character sets, SAUCE editor, 9px flag, reference layers
+   (drawn over the canvas, never composited; convertible to image layers), scaling cells (nearest, or re-matched
+   through shadeans), flips, recent files (desktop).
+   Not yet: transforming a selection in place (move/rotate), shade/colorize brushes as their own tools, shifter,
    palette editing.
 3. **Done** — font layers: all 1,071 Synchronet `.tdf` files parse (3,474 fonts; 550 files hold more than
    one, which a first-font-only reader never sees). The set is entirely colour fonts, so outline/block

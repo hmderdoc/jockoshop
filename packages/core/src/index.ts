@@ -8,6 +8,8 @@ export * from "./document.js";
 export * from "./remap.js";
 export * from "./composite.js";
 export * from "./edit.js";
+export * from "./shapes.js";
+export * from "./scale.js";
 export * from "./selection.js";
 export * from "./history.js";
 export * from "./canvas.js";

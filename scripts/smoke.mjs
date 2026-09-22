@@ -497,7 +497,7 @@ await page.keyboard.press("b");
 await clickLayer("title (live text)");
 check("selecting a text layer with a brush active switches to Type, with its text on the left", await toolNow() === "text" && JSON.stringify(await leftPanels()) === '["font"]', `${await toolNow()} ${JSON.stringify(await leftPanels())}`);
 const dimmed = await kd(() => [...document.querySelectorAll(".palette .na")].map((b) => b.getAttribute("aria-label").split(" (")[0]));
-check("tools that can't act on a text layer are dimmed", JSON.stringify(dimmed) === JSON.stringify(["Pencil", "Half block", "Eraser", "Line", "Rectangle", "Fill", "Pick up", "Find & replace"]), dimmed.join(", "));
+check("tools that can't act on a text layer are dimmed", JSON.stringify(dimmed) === JSON.stringify(["Pencil", "Half block", "Eraser", "Line", "Rectangle", "Ellipse", "Fill", "Pick up", "Find & replace"]), dimmed.join(", "));
 await page.keyboard.press("h");
 check("choosing a dimmed tool is refused, with the reason", await toolNow() === "text" && (await kd(() => window.kd.ed.status)).includes("rasterize"), await kd(() => window.kd.ed.status));
 await clickLayer("backdrop");
@@ -624,7 +624,67 @@ await kd(() => document.querySelectorAll(".fkey:not(.arrow)")[1].click());
 check("clicking a slot in the bar with no caret sets the brush", await kd(() => window.kd.ed.glyph === 177));
 await shot("15-fkeys");
 
-check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 13 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
+// ===================================================== ellipse, mirror, SAUCE, reference, scale
+await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed);
+await kd(() => { const e = window.kd.ed; e.zoomFit = false; e.zoom = 2; window.kd.view.paint(); e.emit("ui"); });
+await page.keyboard.press("o");
+await kd(() => { const e = window.kd.ed; e.glyph = 219; e.fg = 14; e.bg = 0; e.emit("ui"); });
+await drag([10, 4], [30, 12]);
+const ellInfo = await kd(() => { const g = window.kd.ed.comp.grid; let n = 0; for (let y = 4; y <= 12; y++) for (let x = 10; x <= 30; x++) if (g.get(x, y).glyph === 219) n++; return { n, mid: g.get(20, 8).glyph, top: g.get(20, 4).glyph, corner: g.get(10, 4).glyph }; });
+check("ellipse tool draws an outline: hollow middle, touches the top, misses the corner", ellInfo.n > 30 && ellInfo.mid !== 219 && ellInfo.top === 219 && ellInfo.corner !== 219, JSON.stringify(ellInfo));
+await mod(["Shift"], () => drag([40, 4], [60, 12]));
+check("…and filled with Shift", (await cell(50, 8)).glyph === 219);
+
+await page.keyboard.press("x");
+check("X turns on mirror mode", await kd(() => window.kd.ed.mirrorX && document.querySelector('[aria-label^="Mirror"]').classList.contains("active")));
+await page.keyboard.press("b");
+await kd(() => { const e = window.kd.ed; e.glyph = 221; e.fg = 12; e.bg = 0; e.emit("ui"); });   // ▌
+await drag([5, 20], [5, 22]);
+const mirInfo = await kd(() => ({ left: window.kd.ed.comp.grid.get(5, 21).glyph, right: window.kd.ed.comp.grid.get(74, 21).glyph }));
+check("mirror mode repeats the stroke across the centre and mirrors the glyph (▌ becomes ▐)", mirInfo.left === 221 && mirInfo.right === 222, JSON.stringify(mirInfo));
+await page.keyboard.press("x");
+
+await clickButton("SAUCE", ".topbar");
+await kd(() => { const [t, a, g] = document.querySelectorAll(".dialog input[type=text]"); t.value = "My Piece"; a.value = "me"; g.value = "grp"; document.querySelector(".dialog textarea").value = "hello\nworld"; });
+await clickButton("Save", ".dialog");
+const sauceNow = await kd(() => window.kd.ed.doc.sauce);
+check("the SAUCE editor sets title, author, group and comments, undoably", sauceNow.title === "My Piece" && sauceNow.author === "me" && sauceNow.comments.length === 2 && await kd(() => window.kd.ed.history.canUndo), JSON.stringify(sauceNow));
+const withSauce = await kd(async () => { const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts"); const { ed } = window.kd; return core.parseAnsi(core.encodeAnsi(ed.comp.grid, { iceColors: false, sauce: ed.doc.sauce })).sauce.title; });
+check("…and it goes out in the .ans", withSauce === "My Piece");
+
+const [refChooser] = await Promise.all([page.waitForFileChooser(), clickButton("New reference image", ".layers")]);
+await refChooser.accept([photo]);
+await page.waitForFunction(() => window.kd.ed.active?.type === "reference");
+// the image decodes asynchronously before it can be drawn
+await page.waitForFunction(() => { const c = document.querySelector("canvas.refs"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; for (let i = 3; i < d.length; i += 4) if (d[i]) return true; return false; }, { timeout: 5000 }).catch(() => {});
+const refInfo = await kd(() => { const e = window.kd.ed, l = e.active; return { tool: e.tool, w: l.width, h: l.height, opacity: l.opacity, exported: e.comp.layers.some((c) => c.type === "reference") && e.comp.owner.some((o) => o >= 0 && e.comp.layers[o].type === "reference"), refsDrawn: (() => { const c = document.querySelector("canvas.refs"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; })() }; });
+check("a reference image shows on the canvas but owns no cells of the picture", refInfo.tool === "move" && refInfo.w === 40 && refInfo.h === 10 && !refInfo.exported && refInfo.refsDrawn > 1000, JSON.stringify(refInfo));
+await drag([39, 9], [59, 9]);
+check("Move's corner handle resizes the reference", await kd(() => window.kd.ed.active.width === 60));
+await clickButton("convert to image layer", ".layers");
+await page.waitForFunction(() => window.kd.ed.active?.type === "image");
+check("…and it converts to a real image layer at the same size", await kd(() => { const l = window.kd.ed.active; return l.cols === 60 && l.x === 0 && l.cache.width === 60; }));
+
+await kd(() => { const e = window.kd.ed; e.setActive(e.doc.layers[0].id); });
+const preScale = await kd(() => ({ w: window.kd.ed.active.grid.width, g: window.kd.ed.active.grid.get(20, 4).glyph }));
+await clickButton("scale", ".layers");
+await kd(() => { const b = [...document.querySelectorAll(".dialog button")].find((b) => b.textContent === "200%"); b.click(); });
+await clickButton("Scale", ".dialog .end");
+await new Promise((r) => setTimeout(r, 300));
+const scaled = await kd(() => ({ w: window.kd.ed.active.grid.width, h: window.kd.ed.active.grid.height, g: window.kd.ed.active.grid.get(40, 8).glyph }));
+check("scale ×2 by cells doubles the layer and keeps its characters", scaled.w === preScale.w * 2 && scaled.h === 50 && scaled.g === preScale.g, JSON.stringify(scaled));
+await mod(["Meta"], () => page.keyboard.press("z"));
+check("scaling is one undo step", await kd(() => window.kd.ed.active.grid.width === 80));
+await clickButton("scale", ".layers");
+await kd(() => { const s = document.querySelector(".dialog select"); s.value = "rematch"; s.dispatchEvent(new Event("change", { bubbles: true })); const b = [...document.querySelectorAll(".dialog button")].find((b) => b.textContent === "50%"); b.click(); });
+await clickButton("Scale", ".dialog .end");
+await page.waitForFunction(() => window.kd.ed.active.grid.width === 40, { timeout: 5000 });
+const remInfo = await kd(() => { const g = window.kd.ed.active.grid; let n = 0; for (let i = 0; i < g.present.length; i++) if (g.present[i]) n++; return { w: g.width, h: g.height, cells: n }; });
+check("scale 50% by re-matching redraws the picture through shadeans at the new size", remInfo.w === 40 && remInfo.h === 13 && remInfo.cells > 20, JSON.stringify(remInfo));
+await shot("16-more-tools");
+
+check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 14 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
 await shot("12-ui");
 
 check("no console errors or page errors", problems.length === 0, problems.slice(0, 3).join(" ; "));

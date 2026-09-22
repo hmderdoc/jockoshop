@@ -140,6 +140,21 @@ export interface ProseLayer extends LayerBase {
   cache?: CellGrid;
 }
 
+/**
+ * A reference image: shown on the canvas to draw from, at a chosen size and
+ * opacity, but never part of the picture — it is not composited or exported.
+ */
+export interface ReferenceLayer extends LayerBase {
+  type: "reference";
+  /** asset path of the image */
+  source: string;
+  /** size in cells; the layer's x/y is its top-left */
+  width: number;
+  height: number;
+  /** 0-1 */
+  opacity: number;
+}
+
 export interface GroupLayer {
   type: "group";
   id: string;
@@ -150,7 +165,7 @@ export interface GroupLayer {
   children: Layer[];
 }
 
-export type ContentLayer = CellsLayer | FontLayer | ImageLayer | ProseLayer;
+export type ContentLayer = CellsLayer | FontLayer | ImageLayer | ProseLayer | ReferenceLayer;
 export type Layer = ContentLayer | GroupLayer;
 
 export interface KdDocument {
@@ -193,9 +208,16 @@ export function createDocument(width = 80, height = 25): KdDocument {
   };
 }
 
-/** The cells a layer currently contributes, or undefined (e.g. cache not built yet). */
+/** The cells a layer currently contributes, or undefined (a reference layer, or a cache not built yet). */
 export function layerGrid(layer: ContentLayer): CellGrid | undefined {
-  return layer.type === "cells" ? layer.grid : layer.cache;
+  return layer.type === "cells" ? layer.grid : layer.type === "reference" ? undefined : layer.cache;
+}
+
+/** The layer's footprint in cells, for handles and outlines. */
+export function layerSize(layer: ContentLayer): { width: number; height: number } | null {
+  if (layer.type === "reference") return { width: layer.width, height: layer.height };
+  const g = layerGrid(layer);
+  return g ? { width: g.width, height: g.height } : null;
 }
 
 /** Visible content layers, bottom first, with groups flattened. */
@@ -241,5 +263,6 @@ export function cloneLayer(layer: Layer, name = `${layer.name} copy`): Layer {
   if (rest.type === "cells") return { ...rest, ...base, grid: rest.grid.clone() };
   if (rest.type === "font") return { ...rest, ...base, runs: cloneData(rest.runs), cache: rest.cache?.clone() };
   if (rest.type === "prose") return { ...rest, ...base, fg: [...rest.fg], bg: [...rest.bg], cache: rest.cache?.clone() };
+  if (rest.type === "reference") return { ...rest, ...base };
   return { ...rest, ...base, options: { ...rest.options }, crop: rest.crop && { ...rest.crop }, cache: rest.cache?.clone() };
 }

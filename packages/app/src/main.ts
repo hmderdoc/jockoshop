@@ -10,6 +10,7 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
+import { sauceDialog } from "./dialogs.js";
 import { buildLeft } from "./left.js";
 import { buildRight } from "./right.js";
 import { liveProp } from "./sections.js";
@@ -67,6 +68,7 @@ async function start(): Promise<void> {
     try {
       const project = /\.kdraw$/i.test(file.name);
       ed.setDocument(project ? loadProject(file.bytes) : documentFromArt(parseArt(file.bytes, file.name)), file.name, project ? file.path : undefined);
+      remember(file.path);
       ed.setStatus(`Opened ${file.name} — ${ed.doc.width}×${ed.doc.height}`);
     } catch (err) { ed.setStatus(`Could not open ${file.name}: ${(err as Error).message}`); }
   };
@@ -97,6 +99,7 @@ async function start(): Promise<void> {
     const path = await io.saveAs(`${baseName()}.kdraw`, bytes, PROJECT);
     if (path === null) return false;
     if (path) { ed.filePath = path; ed.fileName = path.replace(/^.*[\\/]/, ""); }
+    remember(ed.filePath);
     ed.markSaved();
     ed.setStatus(`Saved ${ed.fileName}`);
     return true;
@@ -191,10 +194,38 @@ async function start(): Promise<void> {
   const exportBtn = iconButton("export", "Export…", { onclick: (e) => { e.stopPropagation(); exportMenu.hidden = !exportMenu.hidden; } });
   document.addEventListener("click", () => { exportMenu.hidden = true; });
 
+  // recent files (desktop: paths that can be reopened)
+  const RECENT_KEY = "jockoshop.recent";
+  const recents = (): string[] => { try { return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as string[]; } catch { return []; } };
+  const remember = (path: string | undefined): void => {
+    if (!path) return;
+    const list = [path, ...recents().filter((p) => p !== path)].slice(0, 10);
+    try { localStorage.setItem(RECENT_KEY, JSON.stringify(list)); } catch { /* private mode */ }
+    renderRecent();
+  };
+  const recentMenu = h("div.menu", { hidden: true });
+  const renderRecent = (): void => {
+    const list = recents();
+    recentMenu.replaceChildren(...(list.length ? list.map((p) => h("button", { title: p, onclick: async () => { if (await confirmDiscard()) { try { openPicked(await io.readPath(p)); } catch (err) { ed.setStatus(`Could not open ${p}: ${(err as Error).message}`); } } } }, p.replace(/^.*[\\/]/, ""), h("span.muted", {}, p.replace(/[\\/][^\\/]*$/, "").slice(-28)))) : [h("span.muted", { style: "padding:4px 8px" }, "nothing yet")]),
+      h("button", { onclick: () => { try { localStorage.removeItem(RECENT_KEY); } catch { /* */ } renderRecent(); } }, "clear"));
+  };
+  renderRecent();
+  const recentBtn = iconButton("recent", "Open recent…", { onclick: (e) => { e.stopPropagation(); recentMenu.hidden = !recentMenu.hidden; } });
+  document.addEventListener("click", () => { recentMenu.hidden = true; });
+
+  const mirrorBtn = iconButton("mirror", "Mirror mode (X)", { tip: "every stroke is repeated across the canvas centre; Shift-click for top/bottom", onclick: (e) => toggleMirror(e.shiftKey ? "y" : "x") });
+  const toggleMirror = (axis: "x" | "y"): void => {
+    if (axis === "x") ed.mirrorX = !ed.mirrorX; else ed.mirrorY = !ed.mirrorY;
+    mirrorBtn.classList.toggle("active", ed.mirrorX || ed.mirrorY);
+    ed.setStatus(ed.mirrorX || ed.mirrorY ? `Mirror: ${[ed.mirrorX && "left ↔ right", ed.mirrorY && "top ↕ bottom"].filter(Boolean).join(", ")}` : "Mirror off");
+    ed.emit("ui");
+  };
+
   const topbar = h("header.topbar", {},
     h("strong.logo", {}, "jockoshop"),
     iconButton("new", "New document", { onclick: () => void newDocument() }),
     iconButton("open", "Open…", { tip: "a .kdraw project, or an .ans / .bin / .xb as a new document", onclick: () => void openFile() }),
+    ...(io.desktop ? [h("span.menu-anchor", {}, recentBtn, recentMenu)] : []),
     iconButton("importLayer", "Import as layer…", { tip: "add an .ans / .bin / .xb on top as a new layer", onclick: () => void importLayer() }),
     iconButton("save", "Save project (Ctrl/Cmd+S)", { tip: io.inPlace ? "in place; Shift-click for Save As" : "downloads a .kdraw — layers, live text and key rules stay editable", onclick: (e) => void saveProjectFile(e.shiftKey) }),
     h("span.menu-anchor", {}, exportBtn, exportMenu),
@@ -203,6 +234,8 @@ async function start(): Promise<void> {
     h("button.ib", { title: "Zoom in", "aria-label": "Zoom in", onclick: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)) }, "+"),
     h("span.sep"), size,
     iconButton("canvas", "Canvas size…", { tip: "add or remove rows / columns at any edge, including the top and left", onclick: canvasDialog }),
+    iconButton("sauce", "SAUCE…", { tip: "title, author, group, comments, font", onclick: () => sauceDialog(ed) }),
+    h("span.sep"), mirrorBtn,
     h("span.grow"), title);
 
   /** F1–F10: type the set's glyph where typing is happening, else make it the brush character. */
@@ -309,6 +342,8 @@ async function start(): Promise<void> {
       if (n >= 1 && n <= 10) { e.preventDefault(); typeSetGlyph(n - 1); return; }
       if (n === 11 || n === 12) { e.preventDefault(); cycleCharset(n === 11 ? -1 : 1); return; }
     }
+    if (k === "x" && !e.shiftKey) { toggleMirror("x"); return; }
+    if (k === "x" && e.shiftKey) { toggleMirror("y"); return; }
     const tool = tools.find((t) => t.key === e.key.toLowerCase());
     if (tool) ed.chooseTool(tool.id);
   });
@@ -324,7 +359,7 @@ async function start(): Promise<void> {
       selectAll: () => selectAll(ed), selectNone: () => selectNone(ed), selectInverse: () => selectInverse(ed),
       copy: () => void copySelection(ed), cut: () => cutSelection(ed), paste: () => paste(ed), deleteSel: () => deleteSelection(ed),
       zoomIn: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)), zoomOut: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)),
-      zoomFit: () => setZoomFit(true), canvasSize: canvasDialog,
+      zoomFit: () => setZoomFit(true), canvasSize: canvasDialog, sauce: () => sauceDialog(ed), mirror: () => toggleMirror("x"),
     });
   }
   (window as unknown as { kd: unknown }).kd = { ed, tools, view, lib, io };

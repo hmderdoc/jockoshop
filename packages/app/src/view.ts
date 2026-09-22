@@ -1,4 +1,4 @@
-import { type Raster, type Rect, createRaster, hasBlink, renderGrid } from "@killerdraw/core";
+import { type Layer, type Raster, type Rect, createRaster, hasBlink, layerSize, renderGrid } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 import { type Pointer, type Tool, handleAt, pickUp } from "./tools.js";
 
@@ -6,7 +6,9 @@ import { type Pointer, type Tool, handleAt, pickUp } from "./tools.js";
 export class CanvasView {
   readonly root = document.createElement("div");
   private art = document.createElement("canvas");
+  private refs = document.createElement("canvas");
   private overlay = document.createElement("canvas");
+  private bitmaps = new Map<Uint8Array, ImageBitmap | null>();
   private raster!: Raster;
   private image!: ImageData;
   private hover: Pointer | null = null;
@@ -19,16 +21,17 @@ export class CanvasView {
   constructor(private ed: Editor, private tools: () => Tool) {
     this.root.className = "canvas-wrap";
     this.art.className = "art";
+    this.refs.className = "refs";
     this.overlay.className = "overlay";
     const stack = document.createElement("div");
     stack.className = "canvas-stack";
-    stack.append(this.art, this.overlay);
+    stack.append(this.art, this.refs, this.overlay);
     this.root.append(stack);
 
     this.root.addEventListener("scroll", () => ed.emit("scroll"));
     new ResizeObserver(() => { if (this.fitZoom()) { this.paint(); ed.emit("ui"); } ed.emit("scroll"); }).observe(this.root);
     ed.on("pixels", (rect) => this.paint(rect as Rect | undefined));
-    ed.on("ui", () => this.drawOverlay());
+    ed.on("ui", () => { this.drawRefs(); this.drawOverlay(); });
     ed.on("doc", () => this.drawOverlay());
 
     this.overlay.addEventListener("contextmenu", (e) => e.preventDefault());
@@ -143,9 +146,9 @@ export class CanvasView {
     const w = Math.round(this.raster.width * zoom), hgt = Math.round(this.raster.height * zoom);
     const css = { w: `${w}px`, h: `${hgt}px` };
     if (this.art.style.width !== css.w || this.art.style.height !== css.h) {
-      for (const c of [this.art, this.overlay]) { c.style.width = css.w; c.style.height = css.h; }
-      this.overlay.width = w;
-      this.overlay.height = hgt;
+      for (const c of [this.art, this.refs, this.overlay]) { c.style.width = css.w; c.style.height = css.h; }
+      this.overlay.width = this.refs.width = w;
+      this.overlay.height = this.refs.height = hgt;
       rect = undefined;   // the overlay was cleared by the resize; everything is redrawn below anyway
     }
     const opts = { palette: doc.palette, iceColors: doc.iceColors, letterSpacing9px: ninePx, blinkOff: this.blinkOff };
@@ -166,7 +169,35 @@ export class CanvasView {
       const cw = this.raster.cellWidth, ch = this.raster.cellHeight;
       ctx.putImageData(this.image, 0, 0, rect.x * cw, rect.y * ch, rect.width * cw, rect.height * ch);
     }
+    this.drawRefs();
     this.drawOverlay();
+  }
+
+  /** Reference layers: images to draw from, over the art but not part of it. */
+  drawRefs(): void {
+    const ctx = this.refs.getContext("2d")!;
+    ctx.clearRect(0, 0, this.refs.width, this.refs.height);
+    const z = this.ed.zoom, cw = this.raster.cellWidth * z, ch = this.raster.cellHeight * z;
+    const walk = (layers: Layer[]): void => {
+      for (const l of layers) {
+        if (!l.visible) continue;
+        if (l.type === "group") { walk(l.children); continue; }
+        if (l.type !== "reference") continue;
+        const bytes = this.ed.doc.assets.get(l.source);
+        if (!bytes) continue;
+        if (!this.bitmaps.has(bytes)) {
+          this.bitmaps.set(bytes, null);
+          void createImageBitmap(new Blob([bytes as BlobPart])).then((bmp) => { this.bitmaps.set(bytes, bmp); this.drawRefs(); });
+        }
+        const bmp = this.bitmaps.get(bytes);
+        if (!bmp) continue;
+        ctx.globalAlpha = l.opacity;
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(bmp, l.x * cw, l.y * ch, l.width * cw, l.height * ch);
+      }
+    };
+    walk(this.ed.doc.layers);
+    ctx.globalAlpha = 1;
   }
 
   drawOverlay(): void {
@@ -176,7 +207,7 @@ export class CanvasView {
 
     const l = this.ed.active;
     if (l && l.type !== "group") {
-      const g = l.type === "cells" ? l.grid : l.cache;
+      const g = layerSize(l);
       if (g) {
         ctx.setLineDash([4, 4]);
         ctx.strokeStyle = "rgba(90,200,255,.7)";
@@ -225,6 +256,15 @@ export class CanvasView {
       ctx.setLineDash([4, 4]);
       ctx.strokeStyle = "#fff";
       ctx.stroke(this.outline.path);
+      ctx.setLineDash([]);
+    }
+
+    // mirror mode: the axes
+    if (this.ed.mirrorX || this.ed.mirrorY) {
+      ctx.strokeStyle = "rgba(255,80,220,.6)";
+      ctx.setLineDash([2, 4]);
+      if (this.ed.mirrorX) { const x = (this.ed.doc.width / 2) * cw; ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, this.overlay.height); ctx.stroke(); }
+      if (this.ed.mirrorY) { const y = (this.ed.doc.height / 2) * ch; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(this.overlay.width, y); ctx.stroke(); }
       ctx.setLineDash([]);
     }
 

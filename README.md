@@ -51,12 +51,17 @@ runs; text layers and image layers say what is missing.
 - **Canvas**: add or remove rows and columns at any edge — adding at the top or left shifts every layer along; cropping loses nothing.
 - **3D (3dBBS)**: per-layer depth (0 = at the screen, negative = behind, positive = in front), a stereo mode in the preview (wiggle, follow the mouse, red/cyan, side by side) drawn the way the device draws text layers, and `.ans` export with `CSI = … z` depth tags that other terminals ignore.
 - **F-key character sets**: the TheDraw / PabloDraw / Moebius convention — 16 stock sets, F1–F10 type the set's glyphs at the typewriter caret (or into prose, or into the brush when nothing is being typed), F11/F12 or Ctrl+,/. change set. The set shows as a clickable bar in the footer while the Type tool is active. The Type tool is the **grid typewriter** first: click a cell and type; drag out a frame instead for reflowing prose.
-- **Drawing**: pencil (with per-channel switches: recolour only, or draw characters with no background), half-block brush, eraser, line, rectangle, fill, pick-up, type; undo/redo for everything.
+- **Drawing**: pencil (with per-channel switches: recolour only, or draw characters with no background), half-block brush, eraser, line, rectangle, ellipse (Shift fills), fill, pick-up, type; undo/redo for everything.
+- **Mirror mode** (X; Shift+X for top/bottom): every stroke is repeated across the canvas centre, with glyphs that have a mirror image swapped (▌↔▐, ┌↔┐, ( ↔ ) …).
+- **Reference images**: an image shown over the canvas to draw from, at any size and opacity — never part of the picture or the exports. One click converts it into a real image layer at the same place.
+- **Scale a drawn layer** two ways: *cells* stretches the grid (exact at 200%, 300%…) and keeps every character; *re-match* renders it to pixels, scales, and lets shadeans redraw it — its style, not your strokes. Flip horizontal/vertical too.
+- **SAUCE editor**: title, author, group, date, comments, font name, 9-px flag.
+- **Recent files** (desktop): the clock icon next to Open.
 - **Files**: `.kdraw` project (ZIP: manifest, layer data, masks, original assets, flattened `preview.ans`).
   Open / import: ANS (16-colour, iCE, 24-bit), BIN, XBIN, TundraDraw `.tnd`, Synchronet Ctrl-A `.msg`, Artworx `.adf`, iCE Draw `.idf`, Avatar `.avt`, plain text.
   Export: ANS, 3dBBS ANS, BIN, XBIN, TundraDraw, Ctrl-A, text (CP437 or UTF-8), PNG — the same set PabloDraw writes, plus 3dBBS.
 
-Not yet: moving/transforming a selection in place (paste-as-layer + Move covers it for now), ellipse, mirror mode, reference overlay, SAUCE editor, mesh layers, importing depth tags back into layers, opacity by re-matching, recent files, Windows/Linux builds (untested).
+Not yet: moving/transforming a selection in place (paste-as-layer + Move covers it for now), mesh layers, importing depth tags back into layers, opacity by re-matching, Windows/Linux builds tried on real machines.
 
 ## Web app
 

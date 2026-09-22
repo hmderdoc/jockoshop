@@ -5,7 +5,7 @@ export interface MenuActions {
   undo(): void; redo(): void;
   selectAll(): void; selectNone(): void; selectInverse(): void;
   copy(): void; cut(): void; paste(): void; deleteSel(): void;
-  zoomIn(): void; zoomOut(): void; zoomFit(): void; canvasSize(): void;
+  zoomIn(): void; zoomOut(): void; zoomFit(): void; canvasSize(): void; sauce(): void; mirror(): void;
 }
 
 export async function buildMenu(a: MenuActions): Promise<void> {
@@ -45,6 +45,8 @@ export async function buildMenu(a: MenuActions): Promise<void> {
     await item("Zoom Out", a.zoomOut, "CmdOrCtrl+-"),
     await item("Zoom to Fit", a.zoomFit, "CmdOrCtrl+0"), await sep(),
     await item("Canvas Size…", a.canvasSize),
+    await item("SAUCE…", a.sauce),
+    await item("Mirror Mode", a.mirror, "X"),
   ] });
   const menu = await Menu.new({ items: [app, file, edit, view] });
   await menu.setAsAppMenu();

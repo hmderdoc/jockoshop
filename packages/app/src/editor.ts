@@ -8,18 +8,19 @@ import {
 import { DEFAULT_CHARSET } from "./charsets.js";
 import { ProseEditing } from "./prosetool.js";
 
-export type ToolId = "pencil" | "half" | "eraser" | "line" | "rect" | "fill" | "pick" | "move" | "text"
+export type ToolId = "pencil" | "half" | "eraser" | "line" | "rect" | "ellipse" | "fill" | "pick" | "move" | "text"
   | "marquee" | "lasso" | "wand" | "find";
 
 /** Tools that can act on a live layer; a cells layer takes every tool. */
-const LIVE_LAYER_TOOLS: Record<"font" | "image" | "prose", readonly ToolId[]> = {
+const LIVE_LAYER_TOOLS: Record<"font" | "image" | "prose" | "reference", readonly ToolId[]> = {
   font: ["text", "move", "marquee", "lasso", "wand"],
   image: ["move", "marquee", "lasso", "wand"],
   prose: ["text", "move", "marquee", "lasso", "wand"],
+  reference: ["move", "marquee", "lasso", "wand"],
 };
 
 const TOOL_NAMES: Record<ToolId, string> = {
-  pencil: "Pencil", half: "Half block", eraser: "Eraser", line: "Line", rect: "Rectangle", fill: "Fill", pick: "Pick up",
+  pencil: "Pencil", half: "Half block", eraser: "Eraser", line: "Line", rect: "Rectangle", ellipse: "Ellipse", fill: "Fill", pick: "Pick up",
   move: "Move", text: "Type", marquee: "Marquee", lasso: "Lasso", wand: "Magic wand", find: "Find & replace",
 };
 
@@ -44,6 +45,9 @@ export class Editor {
   glyph = 219;
   /** the active F-key character set (index into CHARSETS) */
   charset = DEFAULT_CHARSET;
+  /** mirror mode: every stroke is repeated left-right about the canvas centre (and/or top-bottom) */
+  mirrorX = false;
+  mirrorY = false;
   /** which channels the drawing tools write; turning one off leaves it as it is (or see-through) */
   drawGlyph = true;
   drawFg = true;
@@ -98,7 +102,10 @@ export class Editor {
   chooseTool(tool: ToolId): boolean {
     const layer = this.active;
     if (!this.toolApplies(tool)) {
-      this.setStatus(`${TOOL_NAMES[tool]} doesn't work on a live ${layer!.type === "font" ? "text" : layer!.type === "prose" ? "prose" : "image"} layer — rasterize “${layer!.name}” to edit its cells, or pick a cells layer.`);
+      const kind = layer!.type === "font" ? "text" : layer!.type === "prose" ? "prose" : layer!.type === "reference" ? "reference" : "image";
+      this.setStatus(layer!.type === "reference"
+        ? `${TOOL_NAMES[tool]} doesn't work on a reference layer — it is only there to look at. Convert it to an image layer, or pick a cells layer.`
+        : `${TOOL_NAMES[tool]} doesn't work on a live ${kind} layer — rasterize “${layer!.name}” to edit its cells, or pick a cells layer.`);
       return false;
     }
     if (tool !== "text" && this.prose.layer) this.prose.end();
@@ -134,7 +141,7 @@ export class Editor {
     if (this.toolApplies(this.tool)) return;
     this.toolBeforeAuto ??= this.tool;
     this.tool = layer.type === "font" || layer.type === "prose" ? "text" : "move";
-    this.setStatus(`${TOOL_NAMES[this.tool]} tool: “${layer.name}” is a live ${layer.type === "font" ? "text" : layer.type === "prose" ? "prose" : "image"} layer.`);
+    this.setStatus(`${TOOL_NAMES[this.tool]} tool: “${layer.name}” is a ${layer.type === "font" ? "live text" : layer.type === "prose" ? "prose" : layer.type === "reference" ? "reference" : "live image"} layer.`);
   }
 
   setSelection(sel: Selection | null): void {

@@ -82,6 +82,7 @@ function layerToJson(layer: Layer, files: Record<string, Uint8Array>): LayerJson
     files[`layers/${layer.id}.bin`] = encodeGrid(grid);
     return { ...rest, ...mask };
   }
+  if (layer.type === "reference") { const { mask: _m, ...rest } = layer; return { ...rest, ...mask }; }
   const { cache, mask: _m, ...rest } = layer;
   if (cache) files[`layers/${layer.id}.cache.bin`] = encodeGrid(cache);
   return { ...rest, ...mask };

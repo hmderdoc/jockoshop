@@ -1,6 +1,6 @@
 import {
-  type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES, addImageAsset, createImageLayer, gridFromShadeans,
-  shadeansOptionBlock,
+  type CellGrid, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES, addImageAsset, createImageLayer,
+  gridFromShadeans, shadeansOptionBlock,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 
@@ -42,14 +42,40 @@ export async function imageSize(doc: KdDocument, source: string): Promise<{ widt
   return { width: bmp.width, height: bmp.height };
 }
 
+/** RGBA pixels -> cells through shadeans. `coverage` (0-255 per cell) leaves cells under transparent pixels absent. */
+export async function convertPixels(
+  rgba: Uint8ClampedArray, width: number, height: number, cols: number, rows: number,
+  options: ImageLayer["options"], iceColors: boolean, coverage?: Uint8Array,
+): Promise<CellGrid> {
+  const x = await shadeans();
+  const pix = x.kd_alloc(rgba.length), opt = x.kd_alloc(13 * 4);
+  let out = 0;
+  try {
+    new Uint8Array(x.memory.buffer, pix, rgba.length).set(rgba);
+    new Float32Array(x.memory.buffer, opt, 13).set(shadeansOptionBlock(options, iceColors));
+    out = x.kd_convert(pix, width, height, cols, rows, opt);
+    const cells = new Uint8Array(x.memory.buffer, out, cols * rows * SHADEANS_CELL_BYTES);
+    return gridFromShadeans(cells, cols, rows, coverage);
+  } finally {
+    if (out) x.kd_free(out, cols * rows * SHADEANS_CELL_BYTES);
+    x.kd_free(pix, rgba.length);
+    x.kd_free(opt, 13 * 4);
+  }
+}
+
+/** Rows that keep an image's aspect at `cols` columns of 8x16 cells. */
+export async function rowsForAspect(width: number, height: number, cols: number): Promise<number> {
+  return Math.max(1, (await shadeans()).kd_rows_for_aspect(width, height, cols));
+}
+
 /** Regenerate an image layer's cells from its source image and settings. */
 export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer): Promise<void> {
   const bytes = doc.assets.get(layer.source);
   if (!bytes) throw new Error(`image asset not in document: ${layer.source}`);
-  const [x, bmp] = await Promise.all([shadeans(), bitmapOf(bytes)]);
+  const bmp = await bitmapOf(bytes);
   const crop = layer.crop ?? { x: 0, y: 0, width: bmp.width, height: bmp.height };
   const cols = Math.max(1, layer.cols);
-  const rows = layer.rows > 0 ? layer.rows : Math.max(1, x.kd_rows_for_aspect(crop.width, crop.height, cols));
+  const rows = layer.rows > 0 ? layer.rows : await rowsForAspect(crop.width, crop.height, cols);
 
   const canvas = new OffscreenCanvas(crop.width, crop.height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
@@ -67,20 +93,7 @@ export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer): Pro
     const a = sctx.getImageData(0, 0, cols, rows).data;
     coverage = Uint8Array.from({ length: cols * rows }, (_, i) => a[i * 4 + 3]);
   }
-
-  const pix = x.kd_alloc(rgba.length), opt = x.kd_alloc(13 * 4);
-  let out = 0;
-  try {
-    new Uint8Array(x.memory.buffer, pix, rgba.length).set(rgba);
-    new Float32Array(x.memory.buffer, opt, 13).set(shadeansOptionBlock(layer.options, doc.iceColors));
-    out = x.kd_convert(pix, crop.width, crop.height, cols, rows, opt);
-    const cells = new Uint8Array(x.memory.buffer, out, cols * rows * SHADEANS_CELL_BYTES);
-    layer.cache = gridFromShadeans(cells, cols, rows, coverage);
-  } finally {
-    if (out) x.kd_free(out, cols * rows * SHADEANS_CELL_BYTES);
-    x.kd_free(pix, rgba.length);
-    x.kd_free(opt, 13 * 4);
-  }
+  layer.cache = await convertPixels(rgba, crop.width, crop.height, cols, rows, layer.options, doc.iceColors, coverage);
 }
 
 const jobs = new WeakMap<ImageLayer, { again: boolean }>();
