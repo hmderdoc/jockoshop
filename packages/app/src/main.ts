@@ -61,7 +61,8 @@ async function start(): Promise<void> {
   };
 
   const baseName = (): string => ed.fileName.replace(/\.[^.]+$/, "");
-  const flat = () => composite(ed.doc, { glyphs: ed.glyphs }).grid;
+  // the live composite: it also carries the re-matched cells of translucent layers
+  const flat = () => ed.comp.grid;
 
   /** Open a picked file as the document: a project, or flat art as a one-layer document. */
   const openPicked = (file: Picked): void => {
@@ -174,7 +175,7 @@ async function start(): Promise<void> {
     download(`${baseName()}.png`, encodePng(raster), "image/png");
   };
   const export3d = (): void => {
-    const comp = composite(ed.doc, { glyphs: ed.glyphs }), plan = planDepth(comp);
+    const comp = ed.comp, plan = planDepth(comp);
     download(`${baseName()}-3d.ans`, encodeAnsi(comp.grid, { ...exportOpts(), depth: plan }));
     ed.setStatus(`Exported with ${plan.levels.length} depth layer(s)${plan.merged ? "; more than 16 depths were merged" : ""}${plan.clamped.length ? `; shown at the screen because text can't be in front of it: ${plan.clamped.join(", ")}` : ""}.`);
   };

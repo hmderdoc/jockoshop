@@ -233,9 +233,10 @@ Order is flexible; everything here is in scope.
    merged beyond that), `.ans` export with `CSI = Ps ; Pd * z` / `CSI = Ps z`, and a stereo preview that
    draws deepest-first with 3dBBS's disparity model (glass 2.0 units from the camera), so uncovered areas are
    black exactly as on the device. **(unverified)**: not yet viewed on a 3DS or against `tests/stress_server.py`.
-   Not yet: reading depth tags back in on import.
+   Import reads the tags back: a tagged `.ans` opens as one cells layer per depth plane.
 6. Mesh layers.
-7. Opacity by re-matching.
+7. **Done** — opacity by re-matching (app side: `opacity.ts`), opt-in per layer; exports use the live composite so
+   the re-matched cells go out; the project file's `preview.ans` does not include them (it is built by the core).
 8. **Done (macOS)** — desktop shell. Not yet: headless CLI (`packages/cli`), recent files, Windows/Linux builds.
 
 Not planned yet, not precluded: animation, collaboration.

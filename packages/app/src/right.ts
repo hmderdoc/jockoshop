@@ -245,7 +245,19 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
               sel.value = active.textWrap ?? "auto";
               return sel;
             })())),
-          (active.depth ?? 0) > 0 && h("p.hint", {}, "In front of the screen: 3dBBS text layers can't do that yet (protocol 0.3), so export puts this layer at the screen.")),
+          (active.depth ?? 0) > 0 && h("p.hint", {}, "In front of the screen: 3dBBS text layers can't do that yet (protocol 0.3), so export puts this layer at the screen."),
+          (() => {
+            const cur = active.opacity ?? 1;
+            let from: number | undefined | null = null;
+            const readout = h("span.muted", {}, `${Math.round(cur * 100)}%`);
+            const input = h("input", {
+              type: "range", min: 0.1, max: 1, step: 0.05, value: String(cur),
+              oninput: () => { from ??= active.opacity; const v = Number(input.value); active.opacity = v >= 1 ? undefined : v; readout.textContent = `${Math.round(v * 100)}%`; ed.recomposite(); },
+              onchange: () => { if (from !== null) { const to = active.opacity; active.opacity = from; ed.setProps("Layer opacity", active, { opacity: to } as Partial<ContentLayer>); from = null; } },
+            });
+            return h("label.slider", { title: "Below 100% the layer is blended as pixels and its cells re-matched through shadeans in the flattened picture. The layer's own cells never change." }, h("span", {}, "opacity"), input, readout);
+          })(),
+          (active.opacity ?? 1) < 1 && h("p.hint", {}, "Translucent: what you see (and export) for this layer is shadeans' re-match of the blend, not its cells. Set 100% to get the cells back.")),
       });
       if (active.type === "image") panels.push(imagePanel(ed, active));
       panels.push(paletteSwapPanel(ed, active), maskPanel(ed, active), keyRulesPanel(ed, active));

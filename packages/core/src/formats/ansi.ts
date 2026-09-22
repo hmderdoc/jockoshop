@@ -14,6 +14,12 @@ export interface ImportedArt {
   palette?: Rgb[];
   /** raw font bitmap (XBIN only) */
   fontBytes?: Uint8Array;
+  /**
+   * 3dBBS text depth, when the file used `CSI = … z`: the protocol layer each
+   * cell was written on, and each layer's Pd (centi-units behind the glass).
+   */
+  depthLayer?: Uint8Array;
+  depths?: number[];
 }
 
 /** SGR colour number <-> VGA attribute colour. The mapping is its own inverse. */
@@ -47,14 +53,17 @@ export function parseAnsi(bytes: Uint8Array, opts: { width?: number } = {}): Imp
   let glyph = new Uint8Array(W * cap).fill(32);
   let fgs = new Uint32Array(W * cap).fill(7);
   let bgs = new Uint32Array(W * cap);
+  let layers = new Uint8Array(W * cap);
+  let curLayer = 0, sawDepth = false;
+  const depths: number[] = [];
   let rows = 0;
   const ensure = (y: number): void => {
     if (y >= cap) {
       let n = cap;
       while (y >= n) n *= 2;
-      const g = new Uint8Array(W * n).fill(32), f = new Uint32Array(W * n).fill(7), b = new Uint32Array(W * n);
-      g.set(glyph); f.set(fgs); b.set(bgs);
-      glyph = g; fgs = f; bgs = b; cap = n;
+      const g = new Uint8Array(W * n).fill(32), f = new Uint32Array(W * n).fill(7), b = new Uint32Array(W * n), ly = new Uint8Array(W * n);
+      g.set(glyph); f.set(fgs); b.set(bgs); ly.set(layers);
+      glyph = g; fgs = f; bgs = b; layers = ly; cap = n;
     }
     if (y + 1 > rows) rows = y + 1;
   };
@@ -107,6 +116,16 @@ export function parseAnsi(bytes: Uint8Array, opts: { width?: number } = {}): Imp
       if (i >= end) break;
       const final = bytes[i++];
       const body = String.fromCharCode(...bytes.subarray(start, i - 1));
+      // 3dBBS text depth: CSI = Ps z selects a layer, CSI = Ps ; Pd * z sets a layer's depth
+      if (final === 0x7a && body.startsWith("=")) {
+        const m = /^=(\d*)(?:;(\d*))?(\*)?$/.exec(body);
+        if (m) {
+          sawDepth = true;
+          const ps = Math.min(15, Number(m[1] || 0));
+          if (m[3]) depths[ps] = Math.min(1800, Number(m[2] || 0)); else curLayer = ps;
+        }
+        continue;
+      }
       if (body !== "" && !/^[0-9;]*$/.test(body)) continue;   // private/intermediate forms: not ours
       const ps = body === "" ? [] : body.split(";").map((s) => (s === "" ? 0 : parseInt(s, 10)));
       const n = ps[0] || 1;
@@ -143,7 +162,7 @@ export function parseAnsi(bytes: Uint8Array, opts: { width?: number } = {}): Imp
     const nb = bgRgb >= 0 ? bgRgb : bgBase + (blink ? 8 : 0);
     const f = inverse ? nb : nf, b = inverse ? nf : nb;
     const o = y * W + x;
-    glyph[o] = c; fgs[o] = f; bgs[o] = b;
+    glyph[o] = c; fgs[o] = f; bgs[o] = b; layers[o] = curLayer;
     if (++x >= W) { x = 0; y++; }
   }
 
@@ -155,11 +174,13 @@ export function parseAnsi(bytes: Uint8Array, opts: { width?: number } = {}): Imp
   grid.bg.set(bgs.subarray(0, W * H));
   grid.present.fill(CH_ALL);
   const flags = sauce?.flags ?? 0;
+  const depth = sawDepth ? { depthLayer: layers.slice(0, W * H), depths: Array.from({ length: 16 }, (_, n) => depths[n] ?? 0) } : {};
   return {
     grid, sauce,
     iceColors: (flags & SAUCE_FLAG_ICE) !== 0,
     letterSpacing9px: (flags & 6) === SAUCE_FLAG_9PX,
     fontName: sauce?.fontName || "IBM VGA",
+    ...depth,
   };
 }
 

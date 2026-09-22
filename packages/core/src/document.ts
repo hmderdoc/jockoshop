@@ -39,6 +39,12 @@ interface LayerBase {
   /** palette swap: 16 entries, palette colour i is shown as remap[i] (see remap.ts) */
   remap?: number[];
   /**
+   * 0-1; undefined = 1. Text cells cannot be half-transparent, so a translucent
+   * layer is blended as pixels and its cells re-matched through shadeans by
+   * the app — its cells stop being the ones drawn. Opt-in per layer for that reason.
+   */
+  opacity?: number;
+  /**
    * Whether prose layers flow around this layer's content. undefined = auto:
    * a layer that covers most of a prose frame is a background and is flowed
    * over; anything smaller is an obstacle.

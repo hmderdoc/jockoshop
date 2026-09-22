@@ -55,13 +55,15 @@ runs; text layers and image layers say what is missing.
 - **Mirror mode** (X; Shift+X for top/bottom): every stroke is repeated across the canvas centre, with glyphs that have a mirror image swapped (▌↔▐, ┌↔┐, ( ↔ ) …).
 - **Reference images**: an image shown over the canvas to draw from, at any size and opacity — never part of the picture or the exports. One click converts it into a real image layer at the same place.
 - **Scale a drawn layer** two ways: *cells* stretches the grid (exact at 200%, 300%…) and keeps every character; *re-match* renders it to pixels, scales, and lets shadeans redraw it — its style, not your strokes. Flip horizontal/vertical too.
+- **Layer opacity** (opt-in, per layer): below 100% the layer is blended as pixels against what's beneath and its cells are re-matched through shadeans in the flattened picture — the look of translucency, at the cost of those cells being shadeans' choice rather than yours. The layer's own cells never change; 100% brings them back.
+- **3dBBS files reopen in 3D**: an exported `.ans` with depth tags opens as one layer per depth plane, each with its depth set.
 - **SAUCE editor**: title, author, group, date, comments, font name, 9-px flag.
 - **Recent files** (desktop): the clock icon next to Open.
 - **Files**: `.kdraw` project (ZIP: manifest, layer data, masks, original assets, flattened `preview.ans`).
   Open / import: ANS (16-colour, iCE, 24-bit), BIN, XBIN, TundraDraw `.tnd`, Synchronet Ctrl-A `.msg`, Artworx `.adf`, iCE Draw `.idf`, Avatar `.avt`, plain text.
   Export: ANS, 3dBBS ANS, BIN, XBIN, TundraDraw, Ctrl-A, text (CP437 or UTF-8), PNG — the same set PabloDraw writes, plus 3dBBS.
 
-Not yet: moving/transforming a selection in place (paste-as-layer + Move covers it for now), mesh layers, importing depth tags back into layers, opacity by re-matching, Windows/Linux builds tried on real machines.
+Not yet: moving/transforming a selection in place (paste-as-layer + Move covers it for now), mesh layers, Windows/Linux builds tried on real machines.
 
 ## Web app
 

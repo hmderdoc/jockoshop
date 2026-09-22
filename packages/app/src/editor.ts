@@ -6,6 +6,7 @@ import {
   refreshProseLayer,
 } from "@killerdraw/core";
 import { DEFAULT_CHARSET } from "./charsets.js";
+import { applyOpacity, translucentLayers } from "./opacity.js";
 import { ProseEditing } from "./prosetool.js";
 
 export type ToolId = "pencil" | "half" | "eraser" | "line" | "rect" | "ellipse" | "fill" | "pick" | "move" | "text"
@@ -222,6 +223,24 @@ export class Editor {
     }
     this.comp = composite(this.doc, { glyphs: this.glyphs }, fresh ? undefined : rect, fresh ? undefined : this.comp);
     this.emit("pixels", fresh ? undefined : rect);
+    if (translucentLayers(this.doc).length) this.scheduleOpacity();
+  }
+
+  /** Translucent layers are re-matched after the fact (shadeans, async); calls collapse into one run. */
+  private opacityJob: { again: boolean } | null = null;
+  private scheduleOpacity(): void {
+    if (this.opacityJob) { this.opacityJob.again = true; return; }
+    const job = { again: true };
+    this.opacityJob = job;
+    void (async () => {
+      try {
+        while (job.again) {
+          job.again = false;
+          if (await applyOpacity(this)) this.emit("pixels");
+        }
+      } catch (err) { this.setStatus(`Opacity failed: ${(err as Error).message}`); }
+      finally { this.opacityJob = null; }
+    })();
   }
 
   /** Apply an undoable change. */

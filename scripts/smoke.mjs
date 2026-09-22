@@ -684,6 +684,36 @@ const remInfo = await kd(() => { const g = window.kd.ed.active.grid; let n = 0; 
 check("scale 50% by re-matching redraws the picture through shadeans at the new size", remInfo.w === 40 && remInfo.h === 13 && remInfo.cells > 20, JSON.stringify(remInfo));
 await shot("16-more-tools");
 
+// ===================================================== depth tags back in; opacity by re-matching
+await page.goto("http://127.0.0.1:5183/?demo", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed.fileName === "demo");
+const reopened = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const { ed } = window.kd, comp = ed.comp, plan = core.planDepth(comp);
+  const bytes = core.encodeAnsi(comp.grid, { iceColors: ed.doc.iceColors, sauce: ed.doc.sauce, depth: plan });
+  const doc = core.documentFromArt(core.parseArt(bytes, "demo-3d.ans"));
+  const same = core.composite(doc).grid.equals(comp.grid);
+  ed.setDocument(doc, "demo-3d.ans");
+  return { layers: doc.layers.map((l) => `${l.name}@${l.depth ?? 0}`), same };
+});
+check("a 3dBBS export reopens as one layer per depth plane, deepest first, same picture", reopened.same && reopened.layers.length === 3 && reopened.layers[0] === "depth −300@-300" && reopened.layers[2] === "at the screen@0", JSON.stringify(reopened));
+
+await page.goto("http://127.0.0.1:5183/?demo", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed.fileName === "demo");
+await kd(() => { const e = window.kd.ed; e.setActive(e.doc.layers[2].id); });
+const opaque = await kd(() => { const c = window.kd.ed.comp; const own = [], other = []; for (let i = 0; i < c.owner.length; i++) (c.layers[c.owner[i]]?.type === "font" ? own : other).push(`${c.grid.glyph[i]}:${c.grid.fg[i]}:${c.grid.bg[i]}`); return { own, other, layerCells: window.kd.ed.doc.layers[2].cache.present.filter(Boolean).length }; });
+await kd(() => { const s = [...document.querySelectorAll(".layers label.slider")].find((l) => l.textContent.startsWith("opacity")).querySelector("input"); s.value = "0.5"; s.dispatchEvent(new Event("input", { bubbles: true })); s.dispatchEvent(new Event("change", { bubbles: true })); });
+await page.waitForFunction((first) => { const c = window.kd.ed.comp; for (let i = 0; i < c.owner.length; i++) if (c.layers[c.owner[i]]?.type === "font") return `${c.grid.glyph[i]}:${c.grid.fg[i]}:${c.grid.bg[i]}` !== first; return false; }, { timeout: 8000 }, opaque.own[0]).catch(() => {});
+const half = await kd(() => { const c = window.kd.ed.comp; const own = [], other = []; for (let i = 0; i < c.owner.length; i++) (c.layers[c.owner[i]]?.type === "font" ? own : other).push(`${c.grid.glyph[i]}:${c.grid.fg[i]}:${c.grid.bg[i]}`); return { own, other, layerCells: window.kd.ed.doc.layers[2].cache.present.filter(Boolean).length, opacity: window.kd.ed.doc.layers[2].opacity }; });
+const changedOwn = half.own.filter((v, i) => v !== opaque.own[i]).length;
+check("at 50% opacity the title's cells in the picture are re-matched blends; nothing else moves; the layer itself is untouched", half.opacity === 0.5 && changedOwn > half.own.length * 0.3 && JSON.stringify(half.other) === JSON.stringify(opaque.other) && half.layerCells === opaque.layerCells, `${changedOwn}/${half.own.length} owned cells changed`);
+await mod(["Meta"], () => page.keyboard.press("z"));
+await new Promise((r) => setTimeout(r, 600));
+check("undo puts the opaque cells back", await kd((first) => { const c = window.kd.ed.comp; for (let i = 0; i < c.owner.length; i++) if (c.layers[c.owner[i]]?.type === "font") return `${c.grid.glyph[i]}:${c.grid.fg[i]}:${c.grid.bg[i]}` === first; }, opaque.own[0]));
+await kd(() => { const s = [...document.querySelectorAll(".layers label.slider")].find((l) => l.textContent.startsWith("opacity")).querySelector("input"); s.value = "0.4"; s.dispatchEvent(new Event("input", { bubbles: true })); s.dispatchEvent(new Event("change", { bubbles: true })); });
+await new Promise((r) => setTimeout(r, 900));
+await shot("17-opacity");
+
 check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 14 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
 await shot("12-ui");
 

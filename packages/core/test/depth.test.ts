@@ -102,3 +102,31 @@ describe("stereo preview", () => {
     expect(px(-28, 0)).toEqual(blue);
   });
 });
+
+describe("depth tags come back in", () => {
+  it("a 3dBBS export opens as one layer per depth plane, deepest at the bottom, with depths set", async () => {
+    const { documentFromArt, parseArt } = await import("../src/index.js");
+    const { doc } = scene();
+    const comp = composite(doc);
+    const bytes = encodeAnsi(comp.grid, { iceColors: false, sauce: doc.sauce, depth: planDepth(comp) });
+    const art = parseArt(bytes, "piece-3d.ans");
+    expect(art.depths?.[1]).toBe(150);
+    const back = documentFromArt(art);
+    expect(back.layers.map((l) => [l.name, l.type === "cells" ? l.depth : null])).toEqual([["depth −150", -150], ["at the screen", undefined]]);
+    const deep = back.layers[0] as CellsLayer, screen = back.layers[1] as CellsLayer;
+    expect(deep.grid.get(0, 0)).toMatchObject({ glyph: 219, fg: BLUE });
+    expect(deep.grid.get(2, 0).present).toBe(0);           // the front block's cell belongs to the screen layer
+    expect(screen.grid.get(2, 0)).toMatchObject({ glyph: 219, fg: RED });
+    expect(composite(back).grid.equals(comp.grid)).toBe(true);
+    // and exporting again produces the same tags
+    const again = parseArt(encodeAnsi(composite(back).grid, { iceColors: false, sauce: doc.sauce, depth: planDepth(composite(back)) }), "x.ans");
+    expect(Array.from(again.depthLayer!)).toEqual(Array.from(art.depthLayer!));
+  });
+
+  it("a plain .ans has no depth information and opens as one layer", async () => {
+    const { documentFromArt, parseArt } = await import("../src/index.js");
+    const art = parseArt(encodeAnsi(CellGrid.filled(4, 1, 65, WHITE, BLACK), { iceColors: false, sauce: false }), "x.ans");
+    expect(art.depthLayer).toBeUndefined();
+    expect(documentFromArt(art).layers).toHaveLength(1);
+  });
+});
