@@ -184,8 +184,13 @@ Formats: import/export ANS, BIN, XBIN with SAUCE; export PNG and UTF-8.
 **Depth convention** (the editor's, matching 3dBBS's scene axes where +Z points
 at the viewer): 0 = at the screen, negative = behind it, positive = in front.
 The wire parameter `Pd` is an unsigned distance *behind* the glass, so export
-writes `Pd = -depth`; protocol 0.3 text layers cannot come in front of the
-screen, so positive text depths are clamped to it and reported.
+writes `Pd = -depth`. Verified against the 3dBBS source (2026-09-22):
+`termSetLayerDepth` takes `Pd / 100` world units and `scene3dTextShifts` uses
+`(1/2 − 1/(2 + depth))` — the preview uses the same formula. Typical values
+from fshell_ts: 300 for a backdrop, 135 for panels. Pop-out: protocol 0.3
+clamps negative depth, so front depths go out as `CSI = Ps ; Pd + z`, which a
+0.3 client parses as a layer select (harmless: an explicit `CSI = 0 z` follows)
+and a patched client (`docs/3dbbs-front-depth.patch`) reads as in-front.
 
 **Depth export** flattens the stack; each surviving cell is tagged with the
 depth of the layer that supplied its glyph. At most 16 distinct depths —

@@ -36,7 +36,7 @@ export function documentFromArt(art: ImportedArt, layerName = "Background"): KdD
   const flat = doc.layers[0] as CellsLayer;
   doc.layers = used.map((n) => {
     const pd = art.depths![n];
-    const layer = createCellsLayer(pd ? `depth −${pd}` : "at the screen", flat.grid.width, flat.grid.height);
+    const layer = createCellsLayer(pd > 0 ? `depth −${pd}` : pd < 0 ? `depth +${-pd} (in front)` : "at the screen", flat.grid.width, flat.grid.height);
     if (pd) layer.depth = -pd;
     for (let i = 0; i < flat.grid.present.length; i++) {
       if (art.depthLayer![i] !== n) continue;

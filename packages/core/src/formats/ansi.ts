@@ -118,11 +118,13 @@ export function parseAnsi(bytes: Uint8Array, opts: { width?: number } = {}): Imp
       const body = String.fromCharCode(...bytes.subarray(start, i - 1));
       // 3dBBS text depth: CSI = Ps z selects a layer, CSI = Ps ; Pd * z sets a layer's depth
       if (final === 0x7a && body.startsWith("=")) {
-        const m = /^=(\d*)(?:;(\d*))?(\*)?$/.exec(body);
+        const m = /^=(\d*)(?:;(\d*))?([*+])?$/.exec(body);
         if (m) {
           sawDepth = true;
           const ps = Math.min(15, Number(m[1] || 0));
-          if (m[3]) depths[ps] = Math.min(1800, Number(m[2] || 0)); else curLayer = ps;
+          if (m[3] === "*") depths[ps] = Math.min(1800, Number(m[2] || 0));
+          else if (m[3] === "+") depths[ps] = -Math.min(1800, Number(m[2] || 0));   // in front of the glass (extension)
+          else curLayer = ps;
         }
         continue;
       }
@@ -194,9 +196,11 @@ export interface AnsiExportOptions {
   /** CRLF after every row, for plain terminals that know nothing about SAUCE */
   forceNewlines?: boolean;
   /**
-   * 3dBBS text depth layers (see depth.ts): `levels[n]` is layer n's Pd and
-   * `cellLevel` says which layer each cell belongs to. Written as
-   * `CSI = Ps ; Pd * z` / `CSI = Ps z`, which other terminals ignore.
+   * 3dBBS text depth layers (see depth.ts): `levels[n]` is layer n's signed Pd
+   * and `cellLevel` says which layer each cell belongs to. Behind-the-glass
+   * depths are written as `CSI = Ps ; Pd * z`; in-front ones as
+   * `CSI = Ps ; Pd + z` (extension; a 0.3 client shows them at the glass).
+   * Other terminals ignore all of it.
    */
   depth?: { levels: readonly number[]; cellLevel: Uint8Array };
 }
@@ -221,8 +225,11 @@ export function encodeAnsi(grid: CellGrid, opts: AnsiExportOptions): Uint8Array 
   let curFg: Color = 7, curBg: Color = 0;
   emit("\x1b[0m");
   let depthLayer = 0;
-  // layer 0 at depth 0 is the protocol default and needs no definition
-  opts.depth?.levels.forEach((pd, n) => { if (n || pd) emit(`\x1b[=${n};${pd}*z`); });
+  if (opts.depth) {
+    // layer 0 at depth 0 is the protocol default and needs no definition
+    opts.depth.levels.forEach((pd, n) => { if (n || pd) emit(pd < 0 ? `\x1b[=${n};${-pd}+z` : `\x1b[=${n};${pd}*z`); });
+    emit("\x1b[=0z");   // a 0.3 client reads the `+ z` form as a layer select: start writing on layer 0 regardless
+  }
 
   const setColors = (fg: Color, bg: Color): void => {
     if (fg === curFg && bg === curBg) return;

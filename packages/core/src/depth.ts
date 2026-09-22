@@ -1,46 +1,62 @@
 /**
- * 3dBBS text depth. In the editor a layer's `depth` is signed centi-world-units
- * relative to the screen, matching 3dBBS's scene axes (+Z toward the viewer):
- *   0 = at the screen, negative = behind it, positive = in front of it.
- * The wire protocol (0.3) only carries an unsigned distance BEHIND the glass
- * (`CSI = Ps ; Pd * z`, Pd 0-1800, 16 layers), so export writes Pd = -depth
- * and text that is set in front of the screen is clamped to the screen.
+ * 3dBBS text depth. A layer's `depth` is signed centi-world-units relative to
+ * the screen, matching 3dBBS's scene axes (+Z toward the viewer): 0 = at the
+ * screen, negative = behind it, positive = in front (pop-out).
+ *
+ * On the wire (protocol 0.3) `CSI = Ps ; Pd * z` carries an unsigned distance
+ * BEHIND the glass, Pd 0-1800; the device clamps anything else to the glass.
+ * Front depths are written as `CSI = Ps ; Pd + z` — a proposed extension a
+ * 0.3 client treats as a harmless layer select (so it shows that layer at the
+ * glass), and a patched client reads as Pd centi-units in front.
+ *
+ * What the numbers look like on the device (3dBBS authoring guide, and
+ * fshell_ts in practice): under ~30 reads as barely-there relief, 100+ as clear
+ * separation; backdrops sit around 300. The device's stereo slider scales it all.
  */
 import type { Composite } from "./composite.js";
 import { type Rgb, VGA_PALETTE, isRgb } from "./color.js";
 import type { BitmapFont } from "./font.js";
 import type { Raster, RenderOptions } from "./render.js";
 
-export const MAX_DEPTH_LAYERS = 16, MAX_PD = 1800;
+export const MAX_DEPTH_LAYERS = 16, MAX_PD = 1800, MAX_FRONT_PD = 180;
 /** camera-to-glass distance in world units: where the two eye images coincide */
 const CONVERGENCE = 2.0;
 
-/** Editor depth -> protocol Pd (centi-units behind the glass). */
+/**
+ * Editor depth -> signed Pd: positive = centi-units behind the glass (the
+ * protocol's number), negative = in front (the extension), each clamped to
+ * what can be shown.
+ */
 export function depthToPd(depth: number | undefined): number {
-  return Math.max(0, Math.min(MAX_PD, Math.round(-(depth ?? 0))));
+  const pd = Math.round(-(depth ?? 0)) || 0;   // || 0: never -0
+  return pd >= 0 ? Math.min(MAX_PD, pd) : Math.max(-MAX_FRONT_PD, pd);
 }
 
 export interface DepthPlan {
-  /** Pd of each text layer the export will define; index = protocol layer number. levels[0] is the nearest. */
+  /** signed Pd of each text layer the export will define; index = protocol layer number; ascending, so the nearest is first */
   levels: number[];
   /** per document cell: index into `levels` */
   cellLevel: Uint8Array;
-  /** layers whose depth was in front of the screen and had to be clamped to it */
-  clamped: string[];
+  /** layers in front of the screen: shown at the glass by a protocol-0.3 client */
+  front: string[];
   /** true when more than 16 distinct depths had to be merged */
   merged: boolean;
 }
 
 /** Assign every flattened cell to one of at most 16 protocol depth layers, by the layer that owns it. */
 export function planDepth(comp: Composite): DepthPlan {
-  const clamped = comp.layers.filter((l) => (l.depth ?? 0) > 0).map((l) => l.name);
+  const front = comp.layers.filter((l) => (l.depth ?? 0) > 0).map((l) => l.name);
   const ownerPd = comp.layers.map((l) => depthToPd(l.depth));
   let levels = [...new Set([0, ...ownerPd])].sort((a, b) => a - b);
   const merged = levels.length > MAX_DEPTH_LAYERS;
   const remap = new Map<number, number>(levels.map((v) => [v, v]));
-  while (levels.length > MAX_DEPTH_LAYERS) {   // merge the two closest, never moving the screen plane
-    let at = 1;
-    for (let i = 2; i < levels.length - 1; i++) if (levels[i + 1] - levels[i] < levels[at + 1] - levels[at]) at = i;
+  while (levels.length > MAX_DEPTH_LAYERS) {   // merge the two closest, never moving the screen plane (0)
+    let at = -1;
+    for (let i = 0; i < levels.length - 1; i++) {
+      if (levels[i] === 0 || levels[i + 1] === 0) continue;
+      if (at < 0 || levels[i + 1] - levels[i] < levels[at + 1] - levels[at]) at = i;
+    }
+    if (at < 0) break;
     const a = levels[at], b = levels[at + 1], mid = Math.round((a + b) / 2);
     for (const [k, v] of remap) if (v === a || v === b) remap.set(k, mid);
     levels.splice(at, 2, mid);
@@ -51,18 +67,23 @@ export function planDepth(comp: Composite): DepthPlan {
     const o = comp.owner[i];
     cellLevel[i] = o < 0 ? 0 : levels.indexOf(remap.get(ownerPd[o])!);
   }
-  return { levels, cellLevel, clamped, merged };
-}
-
-/** Horizontal disparity of a point Pd behind the glass, as a fraction of the eye separation. */
-export function disparity(pd: number): number {
-  const d = pd / 100;
-  return d / (CONVERGENCE + d);
+  return { levels, cellLevel, front, merged };
 }
 
 /**
- * One eye's view, the way 3dBBS draws text layers: deepest first, each shifted
- * sideways by its disparity. `eye` is the shift in pixels for disparity 1.0 —
+ * Horizontal disparity of a point at signed Pd, as a fraction of the eye
+ * separation — the device's `(1/focal − 1/D)` with D = 2 + depth, scaled so
+ * a point at infinity is 1. Negative (in front of the glass) crosses over.
+ */
+export function disparity(pd: number): number {
+  const D = Math.max(0.2, CONVERGENCE + pd / 100);
+  return CONVERGENCE * (1 / CONVERGENCE - 1 / D);
+}
+
+/**
+ * One eye's view, the way 3dBBS draws text layers: deepest first (levels are
+ * ascending, so from the end), each shifted sideways by its disparity — a
+ * pop-out layer shifts the other way. `eye` is the shift in pixels for disparity 1.0 —
  * negative for the left eye, positive for the right. Cells moved aside uncover
  * black, because on the wire there is only one grid.
  */

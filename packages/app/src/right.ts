@@ -85,9 +85,9 @@ function buildPreview(ed: Editor, view: CanvasView): HTMLElement {
     if (mode === "flat") info.textContent = `${ed.doc.width}×${ed.doc.height}`;
     else {
       const p = plan!;
-      info.textContent = p.levels.some((d) => d > 0)
-        ? `${p.levels.length} of 16 depths${p.merged ? ", merged" : ""}${p.clamped.length ? `; at the screen: ${p.clamped.join(", ")}` : ""}`
-        : "all layers at the screen — give one a negative depth";
+      info.textContent = p.levels.some((d) => d !== 0)
+        ? `${p.levels.length} of 16 depths${p.merged ? ", merged" : ""}${p.front.length ? `; popping out: ${p.front.join(", ")}` : ""}`
+        : "all layers at the screen — move a layer's depth slider";
       info.title = "Drawn the way 3dBBS draws text layers: deepest first, shifted by disparity, black where a shifted layer uncovers";
     }
   };
@@ -232,9 +232,30 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
     } else if (active && active.type !== "group") {
       const live = active.type !== "cells";
       panels.push({
-        el: panel("layer", "Layer", true, "Depth is for 3dBBS: 0 = at the screen, negative = behind it (to −1800), positive = in front. Pick a 3D mode in the preview to see it.",
+        el: panel("layer", "Layer", true, "3D depth for 3dBBS, in centi-world-units: glass in the middle, into the screen on the left (down to −1800), out of it on the right (to +180). Pick a 3D mode in the preview to see it.",
+          (() => {
+            // in ◄──────── glass ────────► out: the left half spans the useful "behind" range, the right the pop-out range
+            const cur = active.depth ?? 0;
+            let from: number | undefined | null = null;
+            const readout = h("span.muted", {}, cur === 0 ? "at the glass" : cur < 0 ? `${-cur} in` : `${cur} out`);
+            const input = h("input.depth", {
+              type: "range", min: -600, max: 180, step: 5, value: String(Math.max(-600, Math.min(180, cur))),
+              title: "3D depth: drag left to sink the layer into the screen, right to pop it out. Under ~30 is barely visible on the device; 100+ reads clearly; backdrops sit around 300 in.",
+              oninput: () => {
+                from ??= active.depth;
+                const v = Number(input.value);
+                active.depth = v || undefined;
+                readout.textContent = v === 0 ? "at the glass" : v < 0 ? `${-v} in` : `${v} out`;
+                ed.emit("pixels");   // the preview re-plans depth from the layers
+              },
+              onchange: () => { if (from !== null) { const to = active.depth; active.depth = from; ed.setProps("Layer depth", active, { depth: to } as Partial<ContentLayer>); from = null; } },
+            });
+            return h("div.depth-row", {},
+              h("div.depth-scale", {}, h("span", {}, "in"), h("span", {}, "glass"), h("span", {}, "out")),
+              h("div.row", {}, input, readout));
+          })(),
           h("div.row", {},
-            field("3D depth", liveProp(ed, active, "depth", "Layer depth", active.depth, { min: -1800, max: 1800, placeholder: "0", width: 72 }, (v) => v || undefined)),
+            field("exact", liveProp(ed, active, "depth", "Layer depth", active.depth, { min: -1800, max: 180, placeholder: "0", width: 72 }, (v) => v || undefined)),
             active.type === "font" && h("button", { title: "Font, text and spacing are under the Type tool", onclick: () => { ed.chooseTool("text"); focusTextField(); } }, "edit text (T)"),
             active.type === "prose" && h("button", { title: "Edit the text on the canvas", onclick: () => { ed.chooseTool("text"); ed.prose.begin(active); } }, "edit text (T)"),
             live && h("button", { title: "Turn into plain cells you can draw on. It stops being live.", onclick: () => rasterize(active) }, "rasterize"),
@@ -246,7 +267,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
               sel.value = active.textWrap ?? "auto";
               return sel;
             })())),
-          (active.depth ?? 0) > 0 && h("p.hint", {}, "In front of the screen: 3dBBS text layers can't do that yet (protocol 0.3), so export puts this layer at the screen."),
+          (active.depth ?? 0) > 0 && h("p.hint", {}, "Popping out of the screen. Exported as the `+ z` extension: a 3dBBS with the pop-out patch shows it in front; an unpatched (0.3) one shows it at the glass."),
           (() => {
             const cur = active.opacity ?? 1;
             let from: number | undefined | null = null;

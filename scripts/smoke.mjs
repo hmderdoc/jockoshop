@@ -299,12 +299,12 @@ const colsBefore = await kd(() => window.kd.ed.active.cols);
 const stillFocused = await stepField("columns", 5);
 check("a held spinner steps the image width repeatedly, live", stillFocused && await kd(() => window.kd.ed.active.cols) === colsBefore - 5, `${colsBefore} -> ${await kd(() => window.kd.ed.active.cols)}`);
 const depthBefore = await kd(() => window.kd.ed.active.depth ?? 0);
-const stillFocused2 = await stepField("3D depth", 7);
+const stillFocused2 = await stepField("exact", 7);
 check("…and a field that rebuilds its panel on commit (depth) steps 7 times as one change", stillFocused2 && await kd(() => window.kd.ed.active.depth) === depthBefore - 7 && await kd(() => window.kd.ed.history.canUndo), `${depthBefore} -> ${await kd(() => window.kd.ed.active.depth)}`);
 await page.keyboard.press("Tab");
 // hold the mouse on the spin button: it repeats on its own
 const undoCount = await kd(() => window.kd.ed.history.position);
-const spinBtn = await kd(() => { const b = [...document.querySelectorAll(".field")].find((f) => f.textContent.startsWith("3D depth")).querySelector(".spin:last-child").getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+const spinBtn = await kd(() => { const b = [...document.querySelectorAll(".field")].find((f) => f.textContent.startsWith("exact")).querySelector(".spin:last-child").getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
 const d0 = await kd(() => window.kd.ed.active.depth ?? 0);
 await page.mouse.move(spinBtn.x, spinBtn.y);
 await page.mouse.down();
@@ -736,6 +736,24 @@ await page.keyboard.press("Enter");
 await page.waitForFunction((n) => window.kd.ed.doc.layers.length > n, { timeout: 5000 }, layersBeforePick);
 check("Enter picks the font and adds the text layer", await kd(() => { const l = window.kd.ed.active; return l.type === "font" && l.runs[0].font.toLowerCase().includes("cyb"); }));
 await page.keyboard.press("Escape");
+
+// depth slider: left = into the screen, middle = glass, right = out; the preview follows live
+await page.goto("http://127.0.0.1:5183/?demo", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed.fileName === "demo");
+await kd(() => { const e = window.kd.ed; e.setActive(e.doc.layers[2].id); });
+await kd(() => { const s = document.querySelector(".preview-bar select"); s.value = "anaglyph"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await new Promise((r) => setTimeout(r, 300));
+const pvSum = () => kd(() => { const c = document.querySelector("canvas.preview"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let sum = 0; for (let i = 0; i < d.length; i += 4) sum = (sum * 31 + d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) >>> 0; return sum; });
+const atGlass = await pvSum();
+await kd(() => { const s = document.querySelector("input.depth"); s.value = "120"; s.dispatchEvent(new Event("input", { bubbles: true })); });
+await new Promise((r) => setTimeout(r, 300));
+const outInfo = await kd(() => ({ depth: window.kd.ed.doc.layers[2].depth, readout: document.querySelector(".depth-row .muted").textContent, info: document.querySelector(".preview-bar .grow").textContent }));
+check("dragging the depth slider right pops the layer out, live in the 3D preview", outInfo.depth === 120 && outInfo.readout === "120 out" && outInfo.info.includes("popping out") && (await pvSum()) !== atGlass, JSON.stringify(outInfo));
+await kd(() => { const s = document.querySelector("input.depth"); s.dispatchEvent(new Event("change", { bubbles: true })); });
+check("…as one undo step", await kd(() => window.kd.ed.history.canUndo && window.kd.ed.doc.layers[2].depth === 120));
+const wireSeqs = await kd(async () => { const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts"); const { ed } = window.kd; return String.fromCharCode(...core.encodeAnsi(ed.comp.grid, { iceColors: false, sauce: false, depth: core.planDepth(ed.comp) })).match(/\x1b\[=\d+;\d+[*+]z/g); });
+check("the export carries it as the `+ z` pop-out extension beside the `* z` depths", wireSeqs.some((w) => w.endsWith("120+z")) && wireSeqs.some((w) => w.includes("300*z")), JSON.stringify(wireSeqs));
+await shot("19-depth-slider");
 
 check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 14 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
 await shot("12-ui");

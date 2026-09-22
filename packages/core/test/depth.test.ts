@@ -24,18 +24,36 @@ describe("depth convention", () => {
     expect([depthToPd(undefined), depthToPd(0), depthToPd(-150), depthToPd(-5000)]).toEqual([0, 0, 150, 1800]);
   });
 
-  it("text cannot come in front of the screen in protocol 0.3: it is clamped, and reported", () => {
+  it("in front of the screen is a negative Pd, clamped to what the device can show, and reported", () => {
     const { doc, front } = scene();
     front.depth = 80;
     const plan = planDepth(composite(doc));
-    expect(depthToPd(80)).toBe(0);
-    expect(plan.clamped).toEqual(["front"]);
+    expect(depthToPd(80)).toBe(-80);
+    expect(depthToPd(900)).toBe(-180);
+    expect(plan.front).toEqual(["front"]);
+    expect(plan.levels).toEqual([-80, 0, 150]);   // the screen plane is always defined
   });
 
-  it("disparity follows the 3dBBS camera: none at the glass, growing towards 1 with distance", () => {
+  it("disparity follows the 3dBBS camera: none at the glass, growing towards 1 with distance, crossing in front", () => {
     expect(disparity(0)).toBe(0);
     expect(disparity(200)).toBeCloseTo(0.5);      // 2 units behind a glass 2 units away
     expect(disparity(1800)).toBeCloseTo(0.9);
+    expect(disparity(-100)).toBeCloseTo(-1);      // 1 unit in front: halfway to the camera
+  });
+
+  it("front depths go out as the `+ z` extension and come back in", async () => {
+    const { parseArt, documentFromArt } = await import("../src/index.js");
+    const { doc, front } = scene();
+    front.depth = 80;
+    const comp = composite(doc), plan = planDepth(comp);
+    const text = String.fromCharCode(...encodeAnsi(comp.grid, { iceColors: false, sauce: false, depth: plan }));
+    expect(text).toContain("\x1b[=0;80+z");
+    expect(text).toContain("\x1b[=2;150*z");
+    expect(text.indexOf("\x1b[=0z")).toBeGreaterThan(text.indexOf("+z"));   // back on layer 0 before any cell, for 0.3 clients
+    const art = parseArt(encodeAnsi(comp.grid, { iceColors: false, sauce: doc.sauce, depth: plan }), "x.ans");
+    expect(art.depths![0]).toBe(-80);
+    const back = documentFromArt(art);
+    expect(back.layers.map((l) => [l.name, (l as CellsLayer).depth])).toEqual([["depth −150", -150], ["depth +80 (in front)", 80]]);
   });
 });
 
@@ -43,6 +61,7 @@ describe("depth plan", () => {
   it("gives each cell the depth of the layer that owns it; layer 0 is the screen", () => {
     const plan = planDepth(composite(scene().doc));
     expect(plan.levels).toEqual([0, 150]);
+    expect(plan.front).toEqual([]);
     expect(Array.from(plan.cellLevel)).toEqual([1, 1, 0, 1, 1, 1]);
     expect(plan.merged).toBe(false);
   });
@@ -71,7 +90,7 @@ describe("3dBBS export", () => {
     const text = String.fromCharCode(...encodeAnsi(comp.grid, { iceColors: false, sauce: false, depth: plan }));
     expect(text).toContain("\x1b[=1;150*z");
     expect(text).not.toContain("\x1b[=0;0*z");                       // the default layer needs no definition
-    expect(text.match(/\x1b\[=\dz/g)).toEqual(["\x1b[=1z", "\x1b[=0z", "\x1b[=1z", "\x1b[=0z"]);
+    expect(text.match(/\x1b\[=\dz/g)).toEqual(["\x1b[=0z", "\x1b[=1z", "\x1b[=0z", "\x1b[=1z", "\x1b[=0z"]);   // an explicit layer 0 first
   });
 
   it("is still the same picture to a terminal that ignores the depth sequences", () => {
@@ -100,6 +119,18 @@ describe("stereo preview", () => {
     expect(px(28, 12)).toEqual(blue);
     expect(px(-28, 47)).toEqual(black);              // left eye: slid left
     expect(px(-28, 0)).toEqual(blue);
+  });
+
+  it("a pop-out layer shifts the opposite way and is drawn on top", () => {
+    const { doc, front } = scene();
+    front.depth = 100;                               // 1 unit in front: disparity -1
+    const comp = composite(doc), plan = planDepth(comp);
+    const r = createRaster(6, 1, font);
+    renderDepthView(comp, plan, font, r, 28);       // right eye: the red block moves LEFT by 28 px, from x 16..23 to -12..-5 (clipped) — so take a smaller eye
+    renderDepthView(comp, plan, font, r, 8);        // right eye: the block slides 8 px left, backdrop slides right by ~3
+    const at = (x: number) => [...r.data.subarray(x * 4, x * 4 + 3)];
+    expect(at(8)).toEqual([170, 0, 0]);              // red now covers x 8..15
+    expect(at(20)).not.toEqual([170, 0, 0]);
   });
 });
 

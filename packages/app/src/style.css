@@ -169,3 +169,7 @@ h4:first-child { margin-top: 0; }
 .menu-sep { margin: 4px 0 2px; padding: 4px 8px 0; border-top: 1px solid var(--line); font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
 .layer.ref .name { font-style: italic; color: var(--muted); }
 .layer.ref.active .name { color: #fff; }
+.depth-row { margin: 4px 0; }
+.depth-scale { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); padding: 0 2px; }
+.depth-row .row { align-items: center; }
+input.depth { flex: 1; padding: 0; accent-color: var(--hot); }
