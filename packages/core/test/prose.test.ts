@@ -41,8 +41,15 @@ describe("prose layout", () => {
       "one..###two.",
       "three###four",
       "five.###.#..",
-      "six..###seve",   // "seven" is wider than the gap: it is broken, and the "n" overflows
+      "six..###....",   // "seven" would fit the 5-wide gaps, so it is not broken into this 4-wide one: it overflows
     ]);
+  });
+
+  it("skips a gap too narrow for a word instead of breaking the word, when a wider gap exists", () => {
+    const L = prose(10, 3, "Prose flows");
+    const blocked = new Uint8Array(30);
+    for (let x = 3; x < 10; x++) blocked[x] = 1;   // row 0 has only a 3-wide gap
+    expect(show(L, blocked)).toEqual(["...#######", "Prose.....", "flows....."]);
   });
 
   it("aligns each span line", () => {
@@ -108,14 +115,32 @@ describe("prose in a document", () => {
     const L = createProseLayer("text", 12, 3, "abc def ghi");
     L.keys = [];
     doc.layers.push(L);
-    // the texture layer counts as an obstacle: everything is occupied. Turn flow-around into a real test by
-    // keying the texture out of the way is not the point — hide it, so only the bar is an obstacle.
-    bg.visible = false;
+    // the texture covers the whole frame, so it is a background, not an obstacle; the bar is
     refreshProseLayer(doc, L);
     const out = composite(doc).grid;
-    const row = (y: number) => Array.from({ length: 12 }, (_, x) => { const c = out.get(x, y); return c.glyph === 32 ? "." : c.glyph === 179 ? "|" : String.fromCharCode(c.glyph); }).join("");
-    expect(row(0)).toBe("abc...|def..");
+    const row = (y: number) => Array.from({ length: 12 }, (_, x) => { const c = out.get(x, y); return c.glyph === 177 ? "." : c.glyph === 179 ? "|" : String.fromCharCode(c.glyph); }).join("");
+    expect(row(0)).toBe("abc...|def..");   // '.' is the texture showing through
     expect(row(1)).toBe("ghi...|.....");
+  });
+
+  it("a layer can be forced to be an obstacle or never one", () => {
+    const doc = createDocument(12, 2);
+    const bg = doc.layers[0] as CellsLayer;
+    bg.grid = CellGrid.filled(12, 2, 177, BLUE, BLACK);
+    const L = createProseLayer("text", 12, 2, "abc");
+    doc.layers.push(L);
+    bg.textWrap = "always";
+    refreshProseLayer(doc, L);
+    expect(L.cache!.present.some((p) => p !== 0)).toBe(false);   // everything is an obstacle: nothing fits
+    bg.textWrap = "never";
+    refreshProseLayer(doc, L);
+    expect(composite(doc).grid.get(0, 0).glyph).toBe(97);
+    const dot = createCellsLayer("dot", 1, 1);
+    dot.grid.set(0, 0, { glyph: 219, fg: RED, bg: BLACK });
+    dot.textWrap = "never";
+    doc.layers.push(dot);
+    refreshProseLayer(doc, L);
+    expect(composite(doc).grid.get(1, 0).glyph).toBe(98);       // "never": the text goes under the dot, b at x = 1
   });
 
   it("with flow-around off the frame is the only container", () => {

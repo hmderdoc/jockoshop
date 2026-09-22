@@ -14,7 +14,7 @@
  * clicks and arrow keys can be mapped back to the text.
  */
 import { composite } from "./composite.js";
-import { type KdDocument, type ProseLayer, newLayerId } from "./document.js";
+import { type ContentLayer, type KdDocument, type ProseLayer, layerGrid, newLayerId, visibleLayers } from "./document.js";
 import type { GlyphInfo } from "./glyphs.js";
 import { CellGrid } from "./grid.js";
 
@@ -56,6 +56,9 @@ export function layoutProse(layer: ProseLayer, blocked?: Uint8Array): ProseLayou
   const spans: [number, number][][] = [];
   for (let y = 0; y < height; y++) spans.push(rowSpans(blocked, width, y, minGap));
 
+  // a word is only broken when no span in the frame could hold it whole
+  let widest = 0;
+  for (const row of spans) for (const [a, b] of row) widest = Math.max(widest, b - a);
   let y = 0, si = 0;                     // current row and span within it
   let lineStart = 0, x = 0;              // the span's start column and the write column
   const lineChars: number[] = [];        // indices placed on the current span line, for alignment
@@ -104,15 +107,13 @@ export function layoutProse(layer: ProseLayer, blocked?: Uint8Array): ProseLayou
     while (end < n && text[end] !== " " && text[end] !== "\n") end++;
     const len = end - i, room = span[1] - x;
     if (len > room) {
-      if (x > lineStart || len > span[1] - span[0]) {
-        if (x === lineStart) {   // a word wider than the whole span: break it here
-          for (let k = 0; k < room && i < end; k++, i++) { before[i] = place[i] = y * width + x; lineChars.push(i); x++; }
-          ok = nextSpan(false);
-          continue;
-        }
+      if (x === lineStart && len > widest) {   // wider than any gap there is: break it here
+        for (let k = 0; k < room && i < end; k++, i++) { before[i] = place[i] = y * width + x; lineChars.push(i); x++; }
         ok = nextSpan(false);
         continue;
       }
+      ok = nextSpan(false);   // try the next gap
+      continue;
     }
     for (; i < end; i++) { before[i] = place[i] = y * width + x; lineChars.push(i); x++; }
     if (x >= span[1] && i < n && text[i] !== "\n" && text[i] !== " ") ok = nextSpan(false);
@@ -142,8 +143,14 @@ export function renderProse(layer: ProseLayer, layout: ProseLayout): CellGrid {
  */
 export function proseObstacles(doc: KdDocument, layer: ProseLayer, glyphs?: GlyphInfo): Uint8Array | undefined {
   if (!layer.flowAround) return undefined;
-  const was = layer.visible;
-  layer.visible = false;
+  // backgrounds (layers covering most of the frame, or marked "never") are not obstacles: hide them too
+  const hidden: ContentLayer[] = [layer];
+  for (const l of visibleLayers(doc.layers)) {
+    if (l === layer) continue;
+    if (l.textWrap === "never" || (l.textWrap !== "always" && coverage(l, layer) > BACKGROUND_COVERAGE)) hidden.push(l);
+  }
+  const wasVisible = hidden.map((l) => l.visible);
+  for (const l of hidden) l.visible = false;
   try {
     const comp = composite(doc, { glyphs });
     const out = new Uint8Array(layer.width * layer.height);
@@ -155,7 +162,28 @@ export function proseObstacles(doc: KdDocument, layer: ProseLayer, glyphs?: Glyp
       }
     }
     return out;
-  } finally { layer.visible = was; }
+  } finally { hidden.forEach((l, i) => { l.visible = wasVisible[i]; }); }
+}
+
+/** A layer covering more of the frame than this is treated as a background. */
+export const BACKGROUND_COVERAGE = 0.6;
+
+/** Share of the prose frame that a layer's cells occupy (mask honoured; key rules not). */
+export function coverage(other: ContentLayer, frame: ProseLayer): number {
+  const g = layerGrid(other);
+  if (!g || frame.width * frame.height === 0) return 0;
+  let n = 0;
+  for (let y = 0; y < frame.height; y++) {
+    for (let x = 0; x < frame.width; x++) {
+      const lx = x + frame.x - other.x, ly = y + frame.y - other.y;
+      if (lx < 0 || ly < 0 || lx >= g.width || ly >= g.height) continue;
+      if (!g.present[ly * g.width + lx]) continue;
+      const m = other.mask;
+      if (m?.enabled && (lx >= m.width || ly >= m.height || !m.data[ly * m.width + lx])) continue;
+      n++;
+    }
+  }
+  return n / (frame.width * frame.height);
 }
 
 /** Regenerate the layer's cells; returns the layout for caret work. */

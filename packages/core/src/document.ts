@@ -39,6 +39,12 @@ interface LayerBase {
   /** palette swap: 16 entries, palette colour i is shown as remap[i] (see remap.ts) */
   remap?: number[];
   /**
+   * Whether prose layers flow around this layer's content. undefined = auto:
+   * a layer that covers most of a prose frame is a background and is flowed
+   * over; anything smaller is an obstacle.
+   */
+  textWrap?: "always" | "never";
+  /**
    * 3dBBS depth in centi-world-units relative to the screen: 0 (or undefined) =
    * at the screen, negative = behind it, positive = in front. See depth.ts.
    */

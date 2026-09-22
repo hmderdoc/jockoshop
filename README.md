@@ -10,6 +10,15 @@ The project file keeps the recipe
 for a picture (hand-drawn cells, live TheDraw text, source images plus their
 conversion settings) and `.ans` is an export. See [DESIGN.md](DESIGN.md).
 
+![jockoshop](docs/screenshots/overview.png)
+
+| | |
+|---|---|
+| ![prose flowing around other layers](docs/screenshots/prose-flow.png) **Prose** wrapping around a TheDraw title and a converted image; text selected for recolouring | ![an image layer](docs/screenshots/image-layer.png) An **image layer**: shadeans converts it live; every setting is a slider, the original stays in the project |
+| ![palette swap](docs/screenshots/palette-swap.png) A **palette swap** on the title layer — nothing in the layer changes | ![magic wand](docs/screenshots/magic-wand.png) **Magic wand "by look"**: one click takes every cell that shows as flat black |
+
+![3D preview](docs/screenshots/3d-preview.png) The preview in red/cyan: layers at different **3dBBS depths**.
+
 ## Run it
 
 ```sh

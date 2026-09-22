@@ -207,7 +207,14 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
             field("3D depth", liveProp(ed, active, "depth", "Layer depth", active.depth, { min: -1800, max: 1800, placeholder: "0", width: 72 }, (v) => v || undefined)),
             active.type === "font" && h("button", { title: "Font, text and spacing are under the Type tool", onclick: () => { ed.chooseTool("text"); focusTextField(); } }, "edit text (T)"),
             active.type === "prose" && h("button", { title: "Edit the text on the canvas", onclick: () => { ed.chooseTool("text"); ed.prose.begin(active); } }, "edit text (T)"),
-            live && h("button", { title: "Turn into plain cells you can draw on. It stops being live.", onclick: () => rasterize(active) }, "rasterize")),
+            live && h("button", { title: "Turn into plain cells you can draw on. It stops being live.", onclick: () => rasterize(active) }, "rasterize"),
+            active.type !== "prose" && field("prose flows around", (() => {
+              const sel = h("select", { title: "Whether prose layers wrap around this layer's content. Auto: a layer covering most of the text frame is a background and is written over; anything smaller is an obstacle.",
+                onchange: () => ed.setProps("Text wrap", active, { textWrap: sel.value === "auto" ? undefined : sel.value as "always" | "never" }) },
+                h("option", { value: "auto" }, "auto"), h("option", { value: "always" }, "always"), h("option", { value: "never" }, "never"));
+              sel.value = active.textWrap ?? "auto";
+              return sel;
+            })())),
           (active.depth ?? 0) > 0 && h("p.hint", {}, "In front of the screen: 3dBBS text layers can't do that yet (protocol 0.3), so export puts this layer at the screen.")),
       });
       if (active.type === "image") panels.push(imagePanel(ed, active));
