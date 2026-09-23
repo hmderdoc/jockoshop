@@ -9,18 +9,37 @@
  * centi-units in front of the glass); a 0.3 client treats it as a harmless
  * layer select and shows that layer at the glass.
  *
- * What the numbers look like on the device (3dBBS authoring guide, and
- * fshell_ts in practice): under ~30 reads as barely-there relief, 100+ as clear
- * separation; backdrops sit around 300. The device's stereo slider scales it all.
+ * What the numbers do on the device, from its own projection (3dBBS main.c:
+ * iod = slider / 3; scene3d.c: fov 40°, D = 2 + depth; 400 px top screen),
+ * as the separation between the two eyes' copies at full slider:
+ *   Pd 12 → 3 px, 50 → 11 px, 100 → 18 px, 190 → 27 px, 300 → 33 px, 565 → 41 px;
+ *   in front: 20 → 6 px, 30 → 10 px, 50 → 18 px, 80 → 37 px, 100 → 55 px, 135 → 114 px.
+ * Past ~26 px (≈5 mm, about 1° at arm's length) the eyes struggle to fuse
+ * the copies and the effect collapses; pop-out runs away fast because D
+ * shrinks toward the camera. `deviceShiftPx` is that formula.
  */
 import type { Composite } from "./composite.js";
 import { type Rgb, VGA_PALETTE, isRgb } from "./color.js";
 import type { BitmapFont } from "./font.js";
 import type { Raster, RenderOptions } from "./render.js";
 
-export const MAX_DEPTH_LAYERS = 16, MAX_PD = 1800, MAX_FRONT_PD = 180;
+export const MAX_DEPTH_LAYERS = 16, MAX_PD = 1800, MAX_FRONT_PD = 100;
+/** what the depth slider offers: past these the device's copies drift apart faster than eyes fuse them */
+export const SLIDER_IN_PD = 300, SLIDER_OUT_PD = 60;
 /** camera-to-glass distance in world units: where the two eye images coincide */
 const CONVERGENCE = 2.0;
+/** 3DS geometry mirrored from 3dBBS: iod = slider / 3 (main.c), fov 40°, 400×240 top screen (scene3d.c) */
+const DEVICE = { iod: 1 / 3, halfTan: Math.tan((40 * Math.PI) / 180 / 2), aspect: 400 / 240, halfWidth: 200 };
+
+/**
+ * Per-eye horizontal shift, in top-screen pixels, of text at signed Pd with
+ * the device's depth slider at `slider` (0..1; 1 = fully up). Negative shifts
+ * cross (pop-out). Twice its magnitude is how far apart the two copies land.
+ */
+export function deviceShiftPx(pd: number, slider = 1): number {
+  const D = Math.max(0.2, CONVERGENCE + pd / 100);
+  return ((0.5 * DEVICE.iod * slider * (1 / CONVERGENCE - 1 / D)) / (DEVICE.halfTan * DEVICE.aspect)) * DEVICE.halfWidth;
+}
 
 /**
  * Editor depth -> signed Pd: positive = centi-units behind the glass (the

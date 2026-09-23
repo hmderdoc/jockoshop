@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   BLACK, BLUE, CellGrid, type CellsLayer, RED, WHITE, composite, createCellsLayer, createDocument, createRaster,
-  depthToPd, disparity, encodeAnsi, parseAnsi, parseRawFont, planDepth, renderDepthView,
+  depthToPd, deviceShiftPx, disparity, encodeAnsi, parseAnsi, parseRawFont, planDepth, renderDepthView,
 } from "../src/index.js";
 
 const font = parseRawFont(new Uint8Array(readFileSync(new URL("../assets/ibmstd.f16", import.meta.url))));
@@ -29,9 +29,15 @@ describe("depth convention", () => {
     front.depth = 80;
     const plan = planDepth(composite(doc));
     expect(depthToPd(80)).toBe(-80);
-    expect(depthToPd(900)).toBe(-180);
+    expect(depthToPd(900)).toBe(-100);
     expect(plan.front).toEqual(["front"]);
     expect(plan.levels).toEqual([-80, 0, 150]);   // the screen plane is always defined
+  });
+
+  it("deviceShiftPx is the 3DS's own projection: iod = slider/3, fov 40°, D = 2 + depth, 400 px wide", () => {
+    const px = (pd: number): number => Math.round(deviceShiftPx(pd) * 10) / 10;
+    expect([px(0), px(12), px(50), px(565), px(-30), px(-135)]).toEqual([0, 1.6, 5.5, 20.3, -4.8, -57.1]);
+    expect(deviceShiftPx(565, 0.5)).toBeCloseTo(deviceShiftPx(565) / 2);   // the slider scales it linearly
   });
 
   it("disparity follows the 3dBBS camera: none at the glass, growing towards 1 with distance, crossing in front", () => {
@@ -70,9 +76,9 @@ describe("depth plan", () => {
     const doc = createDocument(4, 1);
     const pop = doc.layers[0] as CellsLayer;
     pop.grid.set(0, 0, { glyph: 219, fg: RED, bg: BLACK });
-    pop.depth = 120;
+    pop.depth = 60;
     const plan = planDepth(composite(doc));
-    expect(plan.levels).toEqual([-120, 0]);
+    expect(plan.levels).toEqual([-60, 0]);
     expect(Array.from(plan.cellLevel)).toEqual([0, 1, 1, 1]);
   });
 

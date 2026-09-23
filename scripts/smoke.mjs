@@ -745,16 +745,16 @@ await kd(() => { const s = document.querySelector(".preview-bar select"); s.valu
 await new Promise((r) => setTimeout(r, 300));
 const pvSum = () => kd(() => { const c = document.querySelector("canvas.preview"), d = c.getContext("2d").getImageData(0, 0, c.width, c.height).data; let sum = 0; for (let i = 0; i < d.length; i += 4) sum = (sum * 31 + d[i] * 3 + d[i + 1] * 5 + d[i + 2] * 7) >>> 0; return sum; });
 const atGlass = await pvSum();
-await kd(() => { const s = document.querySelector("input.depth"); s.value = "120"; s.dispatchEvent(new Event("input", { bubbles: true })); });
+await kd(() => { const s = document.querySelector("input.depth"); s.value = "40"; s.dispatchEvent(new Event("input", { bubbles: true })); });
 const marks = await kd(() => { const i = document.querySelector("input.depth"), r = i.getBoundingClientRect(), g = document.querySelectorAll(".depth-mark")[1].getBoundingClientRect(); return { glassAt: (g.left + g.width / 2 - r.left) / r.width, zeroAt: (0 - Number(i.min)) / (Number(i.max) - Number(i.min)) }; });
-check("the glass marker sits exactly where the slider's zero is on the linear track", Math.abs(marks.glassAt - marks.zeroAt) < 0.01 && Math.abs(marks.zeroAt - 600 / 780) < 0.001, JSON.stringify(marks));
+check("the glass marker sits exactly where the slider's zero is on the linear track", Math.abs(marks.glassAt - marks.zeroAt) < 0.01 && Math.abs(marks.zeroAt - 300 / 360) < 0.001, JSON.stringify(marks));
 await new Promise((r) => setTimeout(r, 300));
 const outInfo = await kd(() => ({ depth: window.kd.ed.doc.layers[2].depth, readout: [...document.querySelectorAll(".depth-row .muted")].pop().textContent, info: document.querySelector(".preview-bar .grow").textContent }));
-check("dragging the depth slider right pops the layer out, live in the 3D preview", outInfo.depth === 120 && outInfo.readout === "120 out" && outInfo.info.includes("popping out") && (await pvSum()) !== atGlass, JSON.stringify(outInfo));
+check("dragging the depth slider right pops the layer out, live in the 3D preview", outInfo.depth === 40 && outInfo.readout.startsWith("40 out · 14 px apart") && outInfo.info.includes("popping out") && (await pvSum()) !== atGlass, JSON.stringify(outInfo));
 await kd(() => { const s = document.querySelector("input.depth"); s.dispatchEvent(new Event("change", { bubbles: true })); });
-check("…as one undo step", await kd(() => window.kd.ed.history.canUndo && window.kd.ed.doc.layers[2].depth === 120));
+check("…as one undo step", await kd(() => window.kd.ed.history.canUndo && window.kd.ed.doc.layers[2].depth === 40));
 const wireSeqs = await kd(async () => { const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts"); const { ed } = window.kd; return String.fromCharCode(...core.encodeAnsi(ed.comp.grid, { iceColors: false, sauce: false, depth: core.planDepth(ed.comp) })).match(/\x1b\[=\d+;\d+[*+]z/g); });
-check("the export carries it as the `+ z` pop-out extension beside the `* z` depths", wireSeqs.some((w) => w.endsWith("120+z")) && wireSeqs.some((w) => w.includes("300*z")), JSON.stringify(wireSeqs));
+check("the export carries it as the `+ z` pop-out extension beside the `* z` depths", wireSeqs.some((w) => w.endsWith("40+z")) && wireSeqs.some((w) => w.includes("300*z")), JSON.stringify(wireSeqs));
 await shot("19-depth-slider");
 
 check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 14 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));

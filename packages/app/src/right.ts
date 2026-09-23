@@ -3,6 +3,11 @@
  * the layer stack, and the active layer's properties.
  */
 import {
+  MAX_FRONT_PD,
+  SLIDER_OUT_PD,
+  SLIDER_IN_PD,
+  depthToPd,
+  deviceShiftPx,
   type CellsLayer, type ContentLayer, type DepthPlan, type Layer, type Raster, type ReferenceLayer, addFontAsset,
   addImageAsset, cloneLayer, createCellsLayer, createFontLayer, createImageLayer, createProseLayer, createRaster,
   isIdentityRemap, layerGrid, newLayerId, planDepth,
@@ -22,7 +27,7 @@ type PreviewMode = "flat" | "wiggle" | "mouse" | "anaglyph" | "sbs";
 
 /** The whole picture, scaled to the sidebar, with the canvas viewport marked. Drag to scroll the canvas. */
 function buildPreview(ed: Editor, view: CanvasView): HTMLElement {
-  let mode: PreviewMode = "flat", strength = 24, mouseEye = 0, frame = 0;
+  let mode: PreviewMode = "flat", strength = 100, mouseEye = 0, frame = 0;   // strength: the 3DS depth slider, in percent
   let plan: DepthPlan | null = null, left: Raster | null = null, right: Raster | null = null;
   const canvas = h("canvas.preview");
   const box = h("div.preview-box", {}, canvas);
@@ -54,7 +59,7 @@ function buildPreview(ed: Editor, view: CanvasView): HTMLElement {
     if (mode === "flat") ctx.drawImage(art, 0, 0, w, hgt);
     else {
       plan ??= planDepth(ed.comp);
-      const [L, R] = eyes(), half = strength / 2;
+      const [L, R] = eyes(), half = deviceShiftPx(1e9, strength / 100);   // per-eye pixels at infinity: exactly the device's
       const opts = { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px };
       if (scratch.width !== srcW || scratch.height !== art.height) { scratch.width = srcW; scratch.height = art.height; }
       const sctx = scratch.getContext("2d")!;
@@ -108,7 +113,7 @@ function buildPreview(ed: Editor, view: CanvasView): HTMLElement {
   });
   canvas.addEventListener("pointerup", () => { dragging = false; });
 
-  const strengthIn = h("input", { type: "range", min: 0, max: 64, step: 1, value: String(strength), title: "Eye separation", oninput: () => { strength = Number(strengthIn.value); refresh(); } });
+  const strengthIn = h("input", { type: "range", min: 0, max: 100, step: 1, value: String(strength), title: "The 3DS depth slider: 100% is the device fully up. The preview shifts each eye exactly as 3dBBS does.", oninput: () => { strength = Number(strengthIn.value); refresh(); } });
   const modeSel = h("select", {
     title: "Preview mode. The 3D modes show the layer depths as 3dBBS will.",
     onchange: () => { mode = modeSel.value as PreviewMode; strengthIn.hidden = mode === "flat"; refresh(); },
@@ -236,15 +241,21 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
           (() => {
             // A linear slider, −600 (into the screen) … +180 (pop-out). The markers are icons placed at
             // the true fraction of the track: the glass icon sits exactly where the slider's zero is.
-            const MIN = -600, MAX = 180;
+            const MIN = -SLIDER_IN_PD, MAX = SLIDER_OUT_PD;
             const at = (d: number): string => `${((d - MIN) / (MAX - MIN)) * 100}%`;
             const cur = active.depth ?? 0;
             let from: number | undefined | null = null;
-            const label = (d: number): string => (d === 0 ? "at the glass" : d < 0 ? `${-d} in` : `${d} out`);
+            // the readout is measured, not vibes: how far apart the two eyes' copies land on the 3DS at full slider
+            const feel = (px: number): string => (px < 8 ? "subtle" : px <= 26 ? "clear" : px <= 40 ? "strong" : "hard to fuse");
+            const label = (d: number): string => {
+              if (!d) return "at the glass";
+              const apart = 2 * Math.abs(deviceShiftPx(depthToPd(d)));
+              return `${Math.abs(d)} ${d < 0 ? "in" : "out"} · ${apart.toFixed(0)} px apart, ${feel(apart)}`;
+            };
             const readout = h("span.muted", {}, label(cur));
             const input = h("input.depth", {
-              type: "range", min: MIN, max: MAX, step: 5, value: String(Math.max(MIN, Math.min(MAX, cur))),
-              title: "3D depth: drag left to sink the layer into the screen, right to pop it out. Under ~30 is barely visible on the device; 100+ reads clearly; backdrops sit around 300 in.",
+              type: "range", min: MIN, max: MAX, step: 1, value: String(Math.max(MIN, Math.min(MAX, cur))),
+              title: "3D depth: drag left to sink the layer into the screen, right to pop it out. The readout is how far apart the two eyes' copies land on the 3DS at full slider: under ~8 px is subtle, 8–26 reads clearly, past ~26 px (5 mm) the eyes struggle to fuse it. The exact field below goes further.",
               oninput: () => {
                 from ??= active.depth;
                 const v = Number(input.value);
@@ -258,11 +269,11 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
               h("span.depth-mark", { style: `left:${at(d)}`, title: tip }, icon(name, 14));
             return h("div.depth-row", {},
               h("div.depth-track", {}, input,
-                marker("depthIn", MIN, "into the screen (to 600)"), marker("depthGlass", 0, "at the glass"), marker("depthOut", MAX, "out of the screen (to 180)")),
+                marker("depthIn", MIN, `into the screen (to ${-MIN})`), marker("depthGlass", 0, "at the glass"), marker("depthOut", MAX, `out of the screen (to ${MAX})`)),
               h("div.row", {}, h("span.muted", {}, "3D depth"), h("span.grow"), readout));
           })(),
           h("div.row", {},
-            field("exact", liveProp(ed, active, "depth", "Layer depth", active.depth, { min: -1800, max: 180, placeholder: "0", width: 72 }, (v) => v || undefined)),
+            field("exact", liveProp(ed, active, "depth", "Layer depth", active.depth, { min: -1800, max: MAX_FRONT_PD, placeholder: "0", width: 72 }, (v) => v || undefined)),
             active.type === "font" && h("button", { title: "Font, text and spacing are under the Type tool", onclick: () => { ed.chooseTool("text"); focusTextField(); } }, "edit text (T)"),
             active.type === "prose" && h("button", { title: "Edit the text on the canvas", onclick: () => { ed.chooseTool("text"); ed.prose.begin(active); } }, "edit text (T)"),
             live && h("button", { title: "Turn into plain cells you can draw on. It stops being live.", onclick: () => rasterize(active) }, "rasterize"),
