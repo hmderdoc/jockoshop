@@ -228,7 +228,23 @@ Order is flexible; everything here is in scope.
    Also: ellipse, mirror mode (glyph-aware), F-key character sets, SAUCE editor, 9px flag, reference layers
    (drawn over the canvas, never composited; convertible to image layers), scaling cells (nearest, or re-matched
    through shadeans), flips, recent files (desktop).
-   Not yet: transforming a selection in place (move/rotate), shade/colorize brushes as their own tools, shifter,
+   Shapes: outline in brush character / half blocks / CP437 single or double box drawing, hollow / colour / character
+   fill, corner-to-corner drag (HERMedIT-style ellipse). The Brush is one tool with Moebius's modes (half block
+   default, character, shading, colorize) and a size; the eraser takes the size too.
+   Shape layers: a live layer that re-renders a line/box/ellipse from its parameters (kind, style, fill, glyph, colours,
+   box, flip) through the same `planShapeCells` the tools paint with. The shape tools paint cells on a cells layer and
+   place a shape layer anywhere else (Add layer → Shape arms them); on a shape layer their handles reshape it, and the
+   left panels (Shape, Brush) restyle it — the right side stays layer properties. Saved like other live layers.
+   Free transform (`transform.ts`, the Move tool / Cmd+T): one handle model for every layer type; cells content or the
+   selected cells are lifted, scaled nearest-neighbour and put back as one undo step.
+   3D pictures: animated PNG of the wiggle (`encodeApng`, verified against Pillow) and a red/cyan anaglyph PNG.
+   Joint (Moebius collaboration): `core/joint/` = protocol (RLE and messages byte-identical to libtextmode, tested
+   against the vendored module) and `JointSync` (S = mirror of the server canvas; L = composite minus the Remote
+   layer; DRAWs for the cells that changed in L, Remote cleared where a local edit supersedes it); `app/joint.ts` =
+   client, `app/jointui.ts` = connect dialog and floating users/chat window. Tested end to end against the genuine
+   Moebius server (`scripts/joint-server/`, two headless browsers). Not yet: reconnect/merge after a dropped socket,
+   sending SELECTION, rendering other people's floating pastes.
+   Not yet: rotating a selection (free transform moves and scales), shade/colorize brushes as their own tools, shifter,
    palette editing.
 3. **Done** — font layers: all 1,071 Synchronet `.tdf` files parse (3,474 fonts; 550 files hold more than
    one, which a first-font-only reader never sees). The set is entirely colour fonts, so outline/block

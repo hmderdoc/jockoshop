@@ -9,3 +9,8 @@ packages/app/public/shadeans.wasm
 smoke-out/
 packages/desktop/src-tauri/target/
 packages/desktop/src-tauri/gen/
+# the vendored Moebius joint server installs ws/upng-js of its own (node_modules/ above
+# already covers it; spelled out so it is obvious this tree is not committed)
+scripts/joint-server/node_modules/
+# default piece for `node scripts/joint-server/start.mjs`
+/joint.ans

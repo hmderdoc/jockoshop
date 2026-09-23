@@ -1,7 +1,7 @@
 import {
   ART_EXTENSIONS, CP437_UNICODE, type CellsLayer, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
-  documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
-  renderGrid, saveProject,
+  deviceShiftPx, documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
+  renderDepthView, renderGrid, saveProject,
 } from "@killerdraw/core";
 import fontUrl from "../../core/assets/ibmstd.f16?url";
 import welcomeUrl from "../assets/monke.jock?url";
@@ -11,10 +11,12 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
-import { sauceDialog } from "./dialogs.js";
+import { sauceDialog, wiggleDialog } from "./dialogs.js";
+import { JointClient } from "./joint.js";
+import { jointDialog, jointPanel } from "./jointui.js";
 import { buildLeft } from "./left.js";
 import { buildRight } from "./right.js";
-import { liveProp } from "./sections.js";
+import { liveProp, setBrushSize } from "./sections.js";
 import { importImage, scheduleImageRefresh } from "./shadeans.js";
 import { copySelection, cutSelection, deleteSelection, paste, selectAll, selectInverse, selectNone } from "./selectionops.js";
 import { createSelectTools, createTools } from "./tools.js";
@@ -35,6 +37,14 @@ async function start(): Promise<void> {
   const tools = [...createTools(ed), ...createSelectTools(ed)];
   const currentTool = () => tools.find((t) => t.id === ed.tool)!;
   const view = new CanvasView(ed, currentTool);
+  // collaboration: the client drives the document through the Editor's events, the panel floats over the canvas
+  const joint = new JointClient(ed, view);
+  ed.joint = joint;
+  const panel = jointPanel(ed, joint);
+  const openJoint = (): void => {
+    if (joint.connected || joint.connecting) panel.toggle();
+    else jointDialog(joint, () => panel.show());
+  };
 
   /** Add or remove rows and columns at any edge; at the top/left everything shifts along. */
   const canvasDialog = (): void => {
@@ -78,7 +88,11 @@ async function start(): Promise<void> {
     } catch (err) { ed.setStatus(`Could not open ${file.name}: ${(err as Error).message}`); }
   };
 
-  const confirmDiscard = async (): Promise<boolean> => !ed.dirty || confirm(`“${ed.fileName}” has unsaved changes. Discard them?`);
+  const confirmDiscard = async (): Promise<boolean> => {
+    // in a joint, a replaced document is pushed into the room: everyone's canvas becomes this one
+    if (joint.connected && !confirm(`You are in joint ${joint.path}. The document you open or create here is pushed into the room, replacing its canvas for everyone. Continue?`)) return false;
+    return !ed.dirty || confirm(`“${ed.fileName}” has unsaved changes. Discard them?`);
+  };
 
   const openFile = async (): Promise<void> => {
     if (!(await confirmDiscard())) return;
@@ -177,6 +191,7 @@ async function start(): Promise<void> {
     title.title = ed.filePath ?? "";
     zoom.textContent = `${ed.zoomFit ? "fit " : ""}${ed.zoom}×`;
     zoom.classList.toggle("active", ed.zoomFit);
+    jointBtn.classList.toggle("active", joint.connected);
     io.setDirty(ed.dirty);
     io.setTitle(`${ed.dirty ? "• " : ""}${ed.fileName} — jockoshop`);
   };
@@ -191,6 +206,22 @@ async function start(): Promise<void> {
     download(`${baseName()}-3d.ans`, encodeAnsi(comp.grid, { ...exportOpts(), depth: plan }));
     ed.setStatus(`Exported with ${plan.levels.length} depth layer(s)${plan.merged ? "; more than 16 depths were merged" : ""}${plan.front.length ? `; in front of the screen (3dBBS 0.4; older shows them at the screen): ${plan.front.join(", ")}` : ""}.`);
   };
+  /** One eye's view of the depth layers, as the preview draws it: `eye` −1 … 1, at the device's full slider. */
+  const depthFrame = (eye: number): ReturnType<typeof createRaster> => {
+    const comp = ed.comp, plan = planDepth(comp);
+    const raster = createRaster(ed.doc.width, ed.doc.height, font, ed.doc.letterSpacing9px);
+    renderDepthView(comp, plan, font, raster, eye * deviceShiftPx(1e9), { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px });
+    return raster;
+  };
+  const flatDepths = (): boolean => planDepth(ed.comp).levels.every((d) => d === 0);
+  // the wiggle: a dialog that previews the animation and tunes it before saving
+  const exportWiggle = (): void => wiggleDialog(ed, baseName());
+  const exportAnaglyph = (): void => {
+    const L = depthFrame(-1), R = depthFrame(1);
+    for (let i = 0; i < L.data.length; i += 4) { L.data[i + 1] = R.data[i + 1]; L.data[i + 2] = R.data[i + 2]; }   // red = left eye, cyan = right
+    download(`${baseName()}-anaglyph.png`, encodePng(L), "image/png");
+    if (flatDepths()) ed.setStatus("Exported — but every layer is at the glass, so there is no depth in it. Give a layer some depth (right sidebar).");
+  };
   // export is one button with a small menu, instead of three buttons
   const item = (label: string, note: string, ext: string, make: () => Uint8Array, title?: string): HTMLElement =>
     h("button", { title, onclick: () => { try { download(`${baseName()}.${ext}`, make()); } catch (err) { ed.setStatus(`Export failed: ${(err as Error).message}`); } } }, label, h("span.muted", {}, note));
@@ -203,7 +234,9 @@ async function start(): Promise<void> {
     item(".msg", "Synchronet Ctrl-A", "msg", () => encodeCtrlA(flat(), ed.doc.palette), "Colour codes for message bodies and menus; PabloDraw reads it too"),
     item(".txt", "text, CP437", "txt", () => encodeText(flat(), "cp437"), "Characters only"),
     item(".utf8.txt", "text, UTF-8", "utf8.txt", () => encodeText(flat(), "utf8"), "Characters only, for anything modern"),
-    h("button", { onclick: exportPng }, ".png", h("span.muted", {}, "picture")));
+    h("button", { onclick: exportPng }, ".png", h("span.muted", {}, "picture")),
+    h("button", { onclick: exportWiggle, title: "An animated PNG that rocks between the two eyes' views of the depth layers — previewed and tuned before it saves" }, "3D wiggle .png…", h("span.muted", {}, "animated")),
+    h("button", { onclick: exportAnaglyph, title: "The depth layers as a red / cyan stereo picture, for anaglyph glasses" }, "3D red/cyan .png", h("span.muted", {}, "anaglyph")));
   const exportBtn = iconButton("export", "Export…", { onclick: (e) => { e.stopPropagation(); exportMenu.hidden = !exportMenu.hidden; } });
   document.addEventListener("click", () => { exportMenu.hidden = true; });
 
@@ -226,6 +259,7 @@ async function start(): Promise<void> {
   const recentBtn = iconButton("recent", "Open recent…", { onclick: (e) => { e.stopPropagation(); recentMenu.hidden = !recentMenu.hidden; } });
   document.addEventListener("click", () => { recentMenu.hidden = true; });
 
+  const jointBtn = iconButton("joint", "joint", { tip: "draw together on a Moebius collaboration server (Ctrl/Cmd+J)", onclick: openJoint });
   const mirrorBtn = iconButton("mirror", "Mirror mode (X)", { tip: "every stroke is repeated across the canvas centre; Shift-click for top/bottom", onclick: (e) => toggleMirror(e.shiftKey ? "y" : "x") });
   const toggleMirror = (axis: "x" | "y"): void => {
     if (axis === "x") ed.mirrorX = !ed.mirrorX; else ed.mirrorY = !ed.mirrorY;
@@ -248,14 +282,14 @@ async function start(): Promise<void> {
     h("span.sep"), size,
     iconButton("canvas", "Canvas size…", { tip: "add or remove rows / columns at any edge, including the top and left", onclick: canvasDialog }),
     iconButton("sauce", "SAUCE…", { tip: "title, author, group, comments, font", onclick: () => sauceDialog(ed) }),
-    h("span.sep"), mirrorBtn,
+    h("span.sep"), jointBtn, mirrorBtn,
     h("span.grow"), title);
 
   /** F1–F10: type the set's glyph where typing is happening, else make it the brush character. */
   const typeSetGlyph = (slot: number): void => {
     const code = CHARSETS[ed.charset][slot];
     if (currentTool().typeGlyph?.(code)) return;
-    ed.glyph = code;
+    ed.setBrush({ glyph: code });
     ed.emit("ui");
     ed.setStatus(`Brush character: ${glyphLabel(code)} (F${slot + 1} of set ${ed.charset + 1}, ${CHARSET_NAMES[ed.charset]})`);
   };
@@ -293,7 +327,9 @@ async function start(): Promise<void> {
     // under the Type tool the F-key bar stays put; messages appear beside it and the long hint is dropped
     status.replaceChildren(
       ...(ed.tool === "text" ? [charsetBar(), ed.status && h("span.muted.beside", {}, ed.status)] : [h("span", {}, ed.status || hint)]).filter((n): n is HTMLElement => !!n),
-      h("span.grow"), h("span.muted", {}, where));
+      h("span.grow"),
+      ...(joint.connected ? [h("span.muted", { title: `${joint.url} — ${joint.sentDraws} cells sent, ${joint.receivedDraws} received` }, `joint ${joint.path} · ${joint.users.length + 1} here`)] : []),
+      h("span.muted", {}, where));
   };
 
   document.getElementById("app")!.append(topbar,
@@ -324,6 +360,7 @@ async function start(): Promise<void> {
     if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)); return; }
     if (mod && e.key === "-") { e.preventDefault(); setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)); return; }
     if (mod && e.key.toLowerCase() === "n" && !e.shiftKey) { e.preventDefault(); void newDocument(); return; }
+    if (mod && e.key.toLowerCase() === "j") { e.preventDefault(); openJoint(); return; }
     if (typing) return;
     if (currentTool().keydown?.(e)) { e.preventDefault(); return; }
     const k = e.key.toLowerCase();
@@ -342,6 +379,11 @@ async function start(): Promise<void> {
     }
     if (mod && k === "a") { e.preventDefault(); selectAll(ed); return; }
     if (mod && k === "d") { e.preventDefault(); selectNone(ed); return; }
+    if (mod && k === "t") {   // free transform is what Move does
+      e.preventDefault();
+      if (ed.chooseTool("move")) ed.setStatus(ed.selection ? "Free transform: drag a handle to scale the selected cells, inside to move them." : "Free transform: drag a handle to scale, inside to move.");
+      return;
+    }
     if (mod && e.shiftKey && k === "i") { e.preventDefault(); selectInverse(ed); return; }
     if (mod && k === "c") { e.preventDefault(); copySelection(ed, e.shiftKey); return; }
     if (mod && k === "x") { e.preventDefault(); cutSelection(ed); return; }
@@ -357,6 +399,9 @@ async function start(): Promise<void> {
     }
     if (k === "x" && !e.shiftKey) { toggleMirror("x"); return; }
     if (k === "x" && e.shiftKey) { toggleMirror("y"); return; }
+    if (e.key === "[" || e.key === "]") { setBrushSize(ed, ed.brushSize + (e.key === "]" ? 1 : -1)); return; }
+    // the Brush's modes have keys of their own: H half block, B character
+    if (k === "h" || k === "b") { ed.brushMode = k === "h" ? "half" : "char"; ed.chooseTool("brush"); return; }
     const tool = tools.find((t) => t.key === e.key.toLowerCase());
     if (tool) ed.chooseTool(tool.id);
   });
@@ -370,16 +415,17 @@ async function start(): Promise<void> {
   if (io.desktop) {
     await buildMenu({
       newDocument, open: openFile, importLayer, save: () => saveProjectFile(), saveAs: () => saveProjectFile(true),
-      exportAns: () => download(`${baseName()}.ans`, encodeAnsi(flat(), exportOpts())), exportPng, export3d,
+      exportAns: () => download(`${baseName()}.ans`, encodeAnsi(flat(), exportOpts())), exportPng, exportWiggle, export3d,
       exportMore: () => { exportMenu.hidden = false; },
       undo: () => ed.undo(), redo: () => ed.redo(),
       selectAll: () => selectAll(ed), selectNone: () => selectNone(ed), selectInverse: () => selectInverse(ed),
       copy: () => void copySelection(ed), cut: () => cutSelection(ed), paste: () => paste(ed), deleteSel: () => deleteSelection(ed),
       zoomIn: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)), zoomOut: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)),
       zoomFit: () => setZoomFit(true), canvasSize: canvasDialog, sauce: () => sauceDialog(ed), mirror: () => toggleMirror("x"),
+      joint: openJoint,
     });
   }
-  (window as unknown as { kd: unknown }).kd = { ed, tools, view, lib, io };
+  (window as unknown as { kd: unknown }).kd = { ed, tools, view, lib, io, joint };
 
   // the web app works offline once visited, and can be installed (see public/sw.js and manifest.webmanifest);
   // the dev server and the Tauri shell have no use for the worker

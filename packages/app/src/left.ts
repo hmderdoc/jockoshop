@@ -9,16 +9,17 @@ import type { FontLibrary } from "./fonts.js";
 import { type IconName, iconButton } from "./icons.js";
 import {
   type Panel, brushPanel, characterPanel, findPanel, fontPanel, positionPanel, prosePanel, selectOptionsPanel, selectionPanel,
+  shapePanel,
 } from "./sections.js";
 import type { Tool } from "./tools.js";
 import { h } from "./ui.js";
 
 const TOOL_ICONS: Record<ToolId, IconName> = {
-  pencil: "pencil", half: "half", eraser: "eraser", line: "line", rect: "rect", ellipse: "ellipse", fill: "fill", pick: "pick",
+  brush: "pencil", eraser: "eraser", line: "line", rect: "rect", ellipse: "ellipse", fill: "fill", pick: "pick",
   text: "type", move: "move", marquee: "marquee", lasso: "lasso", wand: "wand", find: "find",
 };
 /** palette order: draw, then select, then the rest */
-const ORDER: ToolId[] = ["pencil", "half", "eraser", "line", "rect", "ellipse", "fill", "pick", "text", "marquee", "lasso", "wand", "move", "find"];
+const ORDER: ToolId[] = ["brush", "eraser", "line", "rect", "ellipse", "fill", "pick", "text", "marquee", "lasso", "wand", "move", "find"];
 
 export function buildLeft(ed: Editor, tools: Tool[], lib: FontLibrary): HTMLElement {
   const palette = h("div.palette");
@@ -45,8 +46,10 @@ export function buildLeft(ed: Editor, tools: Tool[], lib: FontLibrary): HTMLElem
         ? "This is a live text layer. Use the Type tool (T) to edit it; rasterize it to draw on it."
         : content.type === "prose" ? "This is a prose layer. Use the Type tool (T) to edit it on the canvas; rasterize it to draw on it."
         : content.type === "reference" ? "This is a reference image: something to draw from. It never becomes part of the picture. Move (V) places and resizes it."
+        : content.type === "shape" ? "A live shape: drag its handles to reshape it, inside to move it. The panels below restyle it. Dragging outside it draws another shape; rasterize it to draw on it."
         : "This is a live image layer. Adjust it on the right; rasterize it to draw on it."));
     }
+    if (tool.id === "line" || tool.id === "rect" || tool.id === "ellipse") out.push(shapePanel(ed, tool));
     return [...out, brushPanel(ed), characterPanel(ed)];
   };
 

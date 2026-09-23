@@ -5,11 +5,11 @@
  */
 import {
   type CellMatch, CellGrid, type CellsLayer, type ContentLayer, type FontLayer, type ImageLayer, type KeyRule, type ProseLayer,
-  SHADEANS_DEFAULTS, type SelectMode, Selection, type ShadeansOptions, addFontAsset, cellPatchCommand, createRaster,
+  SHADEANS_DEFAULTS, type SelectMode, Selection, type ShadeansOptions, type ShapeLayer, addFontAsset, cellPatchCommand, createRaster,
   emptyIsTransparentRule, findCells, fontsOfAsset, identityRemap, isIdentityRemap, randomRemap, refreshFontLayer,
-  refreshProseLayer, remapPresets, renderGrid, replaceCells,
+  refreshProseLayer, refreshShapeLayer, remapPresets, renderGrid, replaceCells,
 } from "@killerdraw/core";
-import type { Editor } from "./editor.js";
+import { type BrushMode, type Editor, MAX_BRUSH_SIZE, type ShapeFill, type ShapeStyle } from "./editor.js";
 import { type FontLibrary, pickFont } from "./fonts.js";
 import { iconButton } from "./icons.js";
 import {
@@ -74,39 +74,95 @@ const check = (label: string, checked: boolean, title: string, onchange: () => v
 
 // ------------------------------------------------------------------ left: drawing
 
+export function setBrushSize(ed: Editor, n: number): void {
+  ed.brushSize = Math.max(1, Math.min(MAX_BRUSH_SIZE, Math.round(n)));
+  ed.emit("ui");
+}
+
 export function brushPanel(ed: Editor): Panel {
   const body = h("div");
   const blinks = (bg: number): boolean => !ed.doc.iceColors && bg >= 8 && bg < 16;
   const update = (): void => {
+    const sized = ed.tool === "brush" || ed.tool === "eraser";
+    const modes: [BrushMode, string, string][] = [
+      ["half", "half block", "Half-block pixels (H): left button paints the foreground colour, right the background. Two per cell, so a picture can be drawn at double the vertical resolution."],
+      ["char", "character", "The character below, in the brush colours"],
+      ["shade", "shading", "Steps cells up the ░ ▒ ▓ █ ramp; right button steps back down"],
+      ["colorize", "colorize", "Recolours without changing characters: the fg / bg switches say which"],
+    ];
+    const modeSeg = ed.tool === "brush" && h("div.seg.cols2", {}, ...modes.map(([m, label, title]) =>
+      h(`button${ed.brushMode === m ? ".active" : ""}`, { title, onclick: () => { ed.brushMode = m; ed.emit("ui"); } }, label)));
+    const channels = ed.tool !== "brush" || ed.brushMode === "char" || ed.brushMode === "colorize";
     const cell = CellGrid.filled(1, 1, ed.glyph, ed.fg, ed.bg), r = createRaster(1, 1, ed.font);
     renderGrid(cell, ed.font, r, { palette: ed.doc.palette, iceColors: true });
     const sample = h("canvas.brush-sample", { width: 8, height: ed.font.height });
     sample.getContext("2d")!.putImageData(new ImageData(r.data as Uint8ClampedArray<ArrayBuffer>, 8, ed.font.height), 0, 0);
     const toggle = (label: string, key: "drawGlyph" | "drawFg" | "drawBg", title: string): HTMLElement =>
-      check(label, ed[key], title, () => { ed[key] = !ed[key]; ed.emit("ui"); });
-    body.replaceChildren(
+      check(label, ed[key], title, () => ed.setDrawChannel(key, !ed[key]));
+    body.replaceChildren(...[
+      modeSeg,
       h("div.brush", {}, sample,
         h("div.grow", {}, h("div", {}, glyphLabel(ed.glyph)),
           h("div.muted", {}, `${colorName(ed.fg)} on ${colorName(ed.bg)}`),
           blinks(ed.bg) && h("div.warn", { title: "With iCE off, a bright background means blink in every viewer. Turn on iCE (top bar) for 16 background colours." }, "blinks (iCE off)")),
-        iconButton("swap", "Swap foreground and background", { onclick: () => { [ed.fg, ed.bg] = [ed.bg, ed.fg]; ed.emit("ui"); } })),
-      h("div.row", { title: "What drawing, Fill and Delete act on" }, h("span.muted", {}, "affects"),
-        toggle("char", "drawGlyph", "Off: drawing recolours without changing characters"),
+        iconButton("swap", "Swap foreground and background", { onclick: () => ed.setBrush({ fg: ed.bg, bg: ed.fg }) })),
+      channels && h("div.row", { title: "What drawing, Fill and Delete act on" }, h("span.muted", {}, "affects"),
+        ed.brushMode !== "colorize" && toggle("char", "drawGlyph", "Off: drawing recolours without changing characters"),
         toggle("fg", "drawFg", "Off: the foreground colour is left alone"),
         toggle("bg", "drawBg", "Off: new cells get no background, so lower layers show behind the character")),
+      ...(sized ? [h("div.row", { title: "The square the brush and eraser paint — [ and ] change it" }, h("span.muted", {}, "size"),
+        h("span.stepper", {},
+          h("button", { title: "Smaller ([)", disabled: ed.brushSize <= 1, onclick: () => setBrushSize(ed, ed.brushSize - 1) }, "−"),
+          h("span.value", {}, `${ed.brushSize}`),
+          h("button", { title: "Larger (])", disabled: ed.brushSize >= MAX_BRUSH_SIZE, onclick: () => setBrushSize(ed, ed.brushSize + 1) }, "+")),
+        h("span.muted", {}, ed.tool === "brush" && ed.brushMode === "half" ? (ed.brushSize === 1 ? "half block" : `${ed.brushSize}×${ed.brushSize} half blocks`) : ed.brushSize === 1 ? "cell" : `${ed.brushSize}×${ed.brushSize} cells`))] : []),
       h("div.swatches", {}, ...Array.from({ length: 16 }, (_, i) => h(
         `button.swatch${ed.fg === i ? ".is-fg" : ""}${ed.bg === i ? ".is-bg" : ""}`, {
           style: `background:${cssColor(i, ed.doc.palette)}`,
           title: `${i} ${colorName(i)} — click: foreground, right-click: background${blinks(i) ? " (blinks: iCE is off)" : ""}`,
-          onclick: () => { ed.fg = i; if (!ed.prose.recolor(i)) ed.emit("ui"); },
-          oncontextmenu: (e: Event) => { e.preventDefault(); ed.bg = i; if (!ed.prose.recolor(undefined, i)) ed.emit("ui"); },
+          onclick: () => { if (ed.prose.recolor(i)) ed.fg = i; else ed.setBrush({ fg: i }); },
+          oncontextmenu: (e: Event) => { e.preventDefault(); if (ed.prose.recolor(undefined, i)) ed.bg = i; else ed.setBrush({ bg: i }); },
         }))),
       ...(ed.prose.selection() ? [h("div.row", { title: "The selected text takes a swatch's colour: click for the foreground, right-click for the background" },
         h("span.muted", {}, `${ed.prose.selectedText().length} characters selected`),
-        h("button", { title: "Selected text: no background, so the layer below shows through", onclick: () => ed.prose.recolor(undefined, -1) }, "see-through bg"))] : []));
+        h("button", { title: "Selected text: no background, so the layer below shows through", onclick: () => ed.prose.recolor(undefined, -1) }, "see-through bg"))] : []),
+    ].filter((n): n is HTMLDivElement => !!n));
   };
   update();
   return { el: panel("brush", "Brush", true, "The character and colours the drawing tools use. Alt-click the canvas to pick up a cell.", body), update };
+}
+
+/** Line, Rectangle, Ellipse: what the outline is made of, and what goes inside. */
+export function shapePanel(ed: Editor, tool: Tool): Panel {
+  const body = h("div");
+  const update = (): void => {
+    const styles: [ShapeStyle, string, string][] = [
+      ["char", "character", "The brush character, in the brush colours"],
+      ["half", "half block", "Half-block pixels, like the half-block brush: left button paints the foreground colour, right the background"],
+      ["single", "single line", tool.id === "ellipse" ? "Box drawing has no curves: an ellipse uses the brush character" : "CP437 box drawing: ┌─┐ │ └─┘ (a diagonal line keeps the brush character)"],
+      ["double", "double line", tool.id === "ellipse" ? "Box drawing has no curves: an ellipse uses the brush character" : "CP437 box drawing: ╔═╗ ║ ╚═╝ (a diagonal line keeps the brush character)"],
+    ];
+    const fills: [ShapeFill, string, string][] = [
+      ["none", "hollow", "Only the outline (Shift while dragging fills with the character)"],
+      ["color", "colour", "A flat background colour inside: spaces in the brush colours"],
+      ["char", "character", "The brush character inside as well"],
+    ];
+    const seg = <T extends string>(cls: string, items: [T, string, string][], cur: T, set: (v: T) => void, dim: (v: T) => boolean = () => false): HTMLElement =>
+      h(`div.seg.${cls}`, {}, ...items.map(([v, label, title]) => h(`button${cur === v ? ".active" : ""}${dim(v) ? ".dim" : ""}`, { title, onclick: () => set(v) }, label)));
+    const rows = [
+      h("div.muted", {}, "outline"),
+      seg("cols2", styles, ed.shapeStyle, (v) => ed.setShapeOptions({ style: v }), (v) => tool.id === "ellipse" && (v === "single" || v === "double")),
+    ];
+    if (tool.id !== "line") rows.push(h("div.muted", {}, "inside"), seg("cols3", fills, ed.shapeFill, (v) => ed.setShapeOptions({ fill: v })));
+    const shapeLayer = ed.active?.type === "shape";
+    rows.push(h("p.hint", {}, shapeLayer
+      ? "Restyling the selected shape. Drag its handles to reshape it, inside to move it; drag outside it for another shape."
+      : ed.active?.type === "cells" ? "On a cells layer the shape is painted as cells. On any other layer (or after Add layer → Shape) it becomes a live shape layer."
+        : "The drag becomes a live shape layer: reshape and restyle it any time; rasterize it for cells."));
+    body.replaceChildren(...rows);
+  };
+  update();
+  return { el: panel("shape", tool.label, true, tool.hint, body), update };
 }
 
 export function characterPanel(ed: Editor): Panel {
@@ -119,8 +175,7 @@ export function characterPanel(ed: Editor): Panel {
   picker.addEventListener("click", (e) => {
     const r = picker.getBoundingClientRect();
     const x = Math.floor(((e.clientX - r.left) / r.width) * 16), y = Math.floor(((e.clientY - r.top) / r.height) * 16);
-    ed.glyph = Math.max(0, Math.min(255, y * 16 + x));
-    ed.emit("ui");
+    ed.setBrush({ glyph: Math.max(0, Math.min(255, y * 16 + x)) });
   });
   const update = (): void => {
     const ctx = picker.getContext("2d")!;

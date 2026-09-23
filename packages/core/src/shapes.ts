@@ -1,5 +1,108 @@
 /** Cell shapes for the drawing tools, and the glyph swaps mirror mode needs. */
 
+/** Cells on a line between two points (Bresenham), both ends included. */
+export function lineCells(x0: number, y0: number, x1: number, y1: number): [number, number][] {
+  const out: [number, number][] = [];
+  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
+  let err = dx + dy;
+  for (;;) {
+    out.push([x0, y0]);
+    if (x0 === x1 && y0 === y1) break;
+    const e2 = 2 * err;
+    if (e2 >= dy) { err += dy; x0 += sx; }
+    if (e2 <= dx) { err += dx; y0 += sy; }
+  }
+  return out;
+}
+
+/** Cells of the rectangle with corners (x0,y0) and (x1,y1), in any order: the outline, or all of it. */
+export function rectCells(x0: number, y0: number, x1: number, y1: number, filled: boolean): [number, number][] {
+  const left = Math.min(x0, x1), right = Math.max(x0, x1), top = Math.min(y0, y1), bottom = Math.max(y0, y1);
+  const out: [number, number][] = [];
+  for (let y = top; y <= bottom; y++) {
+    for (let x = left; x <= right; x++) if (filled || x === left || x === right || y === top || y === bottom) out.push([x, y]);
+  }
+  return out;
+}
+
+/** Cells strictly inside the rectangle (what a box's fill covers). */
+export function rectInterior(x0: number, y0: number, x1: number, y1: number): [number, number][] {
+  const left = Math.min(x0, x1), right = Math.max(x0, x1), top = Math.min(y0, y1), bottom = Math.max(y0, y1);
+  const out: [number, number][] = [];
+  for (let y = top + 1; y < bottom; y++) for (let x = left + 1; x < right; x++) out.push([x, y]);
+  return out;
+}
+
+export type BoxStyle = "single" | "double";
+
+/** The CP437 box-drawing sets: corners, then horizontal and vertical edges. */
+export const BOX_GLYPHS: Record<BoxStyle, { tl: number; tr: number; bl: number; br: number; h: number; v: number }> = {
+  single: { tl: 218, tr: 191, bl: 192, br: 217, h: 196, v: 179 },   // ┌ ┐ └ ┘ ─ │
+  double: { tl: 201, tr: 187, bl: 200, br: 188, h: 205, v: 186 },   // ╔ ╗ ╚ ╝ ═ ║
+};
+
+/**
+ * The outline of a rectangle drawn in box-drawing characters, each cell with
+ * its glyph. A one-row or one-column rectangle is a run of edges; a single
+ * cell is a vertical edge.
+ */
+export function boxCells(x0: number, y0: number, x1: number, y1: number, style: BoxStyle): [number, number, number][] {
+  const g = BOX_GLYPHS[style];
+  const left = Math.min(x0, x1), right = Math.max(x0, x1), top = Math.min(y0, y1), bottom = Math.max(y0, y1);
+  const out: [number, number, number][] = [];
+  if (top === bottom && left === right) return [[left, top, g.v]];
+  if (top === bottom) { for (let x = left; x <= right; x++) out.push([x, top, g.h]); return out; }
+  if (left === right) { for (let y = top; y <= bottom; y++) out.push([left, y, g.v]); return out; }
+  out.push([left, top, g.tl], [right, top, g.tr], [left, bottom, g.bl], [right, bottom, g.br]);
+  for (let x = left + 1; x < right; x++) out.push([x, top, g.h], [x, bottom, g.h]);
+  for (let y = top + 1; y < bottom; y++) out.push([left, y, g.v], [right, y, g.v]);
+  return out;
+}
+
+/** The box-drawing glyph for a straight line, or `fallback` for a diagonal (which has no such glyph). */
+export function lineGlyph(x0: number, y0: number, x1: number, y1: number, style: BoxStyle, fallback: number): number {
+  if (y0 === y1 && x0 !== x1) return BOX_GLYPHS[style].h;
+  if (x0 === x1 && y0 !== y1) return BOX_GLYPHS[style].v;
+  return fallback;
+}
+
+export type ShapeKind = "line" | "rect" | "ellipse";
+/** the brush character, half-block pixels, or CP437 box drawing (ellipses have no box glyphs: they fall back to the character) */
+export type ShapeStyle = "char" | "half" | "single" | "double";
+/** nothing, a flat background colour, or the brush character */
+export type ShapeFill = "none" | "color" | "char";
+
+/**
+ * What a shape covers between two corners. In half-block style every
+ * coordinate is (x, half row) — the caller passes half rows in — otherwise
+ * cells, and an outline cell may carry its own glyph (box drawing) instead of
+ * the brush character. Fill comes first so the outline, drawn after, wins.
+ */
+export interface ShapePlan {
+  half: boolean;
+  fill: [number, number][];
+  outline: [number, number, number | undefined][];
+}
+
+export function planShapeCells(kind: ShapeKind, x0: number, y0: number, x1: number, y1: number, style: ShapeStyle, fill: ShapeFill): ShapePlan {
+  const boxed = kind !== "ellipse" && (style === "single" || style === "double");
+  const half = style === "half";
+  const plain = (cells: [number, number][]): [number, number, undefined][] => cells.map(([x, y]) => [x, y, undefined]);
+  if (kind === "line") {
+    const cells = lineCells(x0, y0, x1, y1);
+    if (boxed) {
+      const g = lineGlyph(x0, y0, x1, y1, style as BoxStyle, -1);
+      return { half, fill: [], outline: cells.map(([x, y]) => [x, y, g < 0 ? undefined : g]) };
+    }
+    return { half, fill: [], outline: plain(cells) };
+  }
+  if (kind === "rect") {
+    const outline = boxed ? boxCells(x0, y0, x1, y1, style as BoxStyle) : plain(rectCells(x0, y0, x1, y1, false));
+    return { half, fill: fill === "none" ? [] : rectInterior(x0, y0, x1, y1), outline };
+  }
+  return { half, fill: fill === "none" ? [] : ellipseCells(x0, y0, x1, y1, true), outline: plain(ellipseCells(x0, y0, x1, y1, false)) };
+}
+
 /** Cells of an ellipse inscribed in the rect from (x0,y0) to (x1,y1) inclusive; filled or outline. */
 export function ellipseCells(x0: number, y0: number, x1: number, y1: number, filled: boolean): [number, number][] {
   const left = Math.min(x0, x1), right = Math.max(x0, x1), top = Math.min(y0, y1), bottom = Math.max(y0, y1);

@@ -1,31 +1,48 @@
 import {
   type BitmapFont, type CellGrid, type CellsLayer, type Color, type Command, type Composite, type ContentLayer,
   type GlyphInfo, History, type KdDocument, type Layer, REMAP_DEFAULTS, type Rect, type RemapOptions, type SelectMode,
-  type Selection, WAND_DEFAULTS,
+  type Selection, type ShapeFill, type ShapeLayer, type ShapeStyle, WAND_DEFAULTS,
   type WandOptions, composite, createDocument, findLayer, glyphInfoFromFont, groupCommand, propertyCommand,
-  refreshProseLayer,
+  refreshProseLayer, refreshShapeLayer,
 } from "@killerdraw/core";
 import { DEFAULT_CHARSET } from "./charsets.js";
 import { applyOpacity, translucentLayers } from "./opacity.js";
 import { ProseEditing } from "./prosetool.js";
 
-export type ToolId = "pencil" | "half" | "eraser" | "line" | "rect" | "ellipse" | "fill" | "pick" | "move" | "text"
+export type ToolId = "brush" | "eraser" | "line" | "rect" | "ellipse" | "fill" | "pick" | "move" | "text"
   | "marquee" | "lasso" | "wand" | "find";
+export const MAX_BRUSH_SIZE = 9;
+/** what the brush paints, as in Moebius: half-block pixels, the character, a shade ramp, or colours only */
+export type BrushMode = "half" | "char" | "shade" | "colorize";
+export type { ShapeFill, ShapeStyle };
 
 /** Tools that can act on a live layer; a cells layer takes every tool. */
-const LIVE_LAYER_TOOLS: Record<"font" | "image" | "prose" | "reference", readonly ToolId[]> = {
-  font: ["text", "move", "marquee", "lasso", "wand"],
-  image: ["move", "marquee", "lasso", "wand"],
-  prose: ["text", "move", "marquee", "lasso", "wand"],
-  reference: ["move", "marquee", "lasso", "wand"],
+// the shape tools on any live layer place a live shape layer above it (on a shape layer, its handles reshape it)
+const LIVE_LAYER_TOOLS: Record<"font" | "image" | "prose" | "reference" | "shape", readonly ToolId[]> = {
+  font: ["text", "line", "rect", "ellipse", "move", "marquee", "lasso", "wand"],
+  image: ["line", "rect", "ellipse", "move", "marquee", "lasso", "wand"],
+  prose: ["text", "line", "rect", "ellipse", "move", "marquee", "lasso", "wand"],
+  reference: ["line", "rect", "ellipse", "move", "marquee", "lasso", "wand"],
+  shape: ["line", "rect", "ellipse", "move", "marquee", "lasso", "wand"],
 };
+const SHAPE_TOOLS: readonly ToolId[] = ["line", "rect", "ellipse"];
 
 const TOOL_NAMES: Record<ToolId, string> = {
-  pencil: "Pencil", half: "Half block", eraser: "Eraser", line: "Line", rect: "Rectangle", ellipse: "Ellipse", fill: "Fill", pick: "Pick up",
+  brush: "Brush", eraser: "Eraser", line: "Line", rect: "Rectangle", ellipse: "Ellipse", fill: "Fill", pick: "Pick up",
   move: "Move", text: "Type", marquee: "Marquee", lasso: "Lasso", wand: "Magic wand", find: "Find & replace",
 };
 
 type EventName = "doc" | "pixels" | "ui" | "status" | "scroll" | "preview";   // preview: arg is the mode to switch the 3D preview to
+
+/**
+ * What the canvas view needs from the collaboration client (joint.ts). Only
+ * this much of it reaches the Editor: the socket, the protocol and the Remote
+ * layer stay out there, and the client drives the Editor through its events.
+ */
+export interface JointPresence {
+  readonly connected: boolean;
+  cursors(): { id: number; nick: string; x: number; y: number; color: string }[];
+}
 
 /** All editor state, plus the one place where the document changes and the view is told about it. */
 export class Editor {
@@ -40,7 +57,9 @@ export class Editor {
   private savedAt = "0:0";
 
   activeId = "";
-  tool: ToolId = "pencil";
+  tool: ToolId = "brush";
+  /** half block by default, as in Moebius */
+  brushMode: BrushMode = "half";
   fg: Color = 7;
   bg: Color = 0;
   glyph = 219;
@@ -53,6 +72,14 @@ export class Editor {
   drawGlyph = true;
   drawFg = true;
   drawBg = true;
+  /** side of the square the pencil, half-block brush and eraser paint (cells; half rows for the half-block brush) */
+  brushSize = 1;
+  /** what the outline of a line, rectangle or ellipse is made of */
+  shapeStyle: ShapeStyle = "char";
+  /** what goes inside a rectangle or ellipse */
+  shapeFill: ShapeFill = "none";
+  /** "Add layer → Shape": the next shape dragged becomes a layer even on a cells layer */
+  pendingShape = false;
   zoom = 2;
   /** zoom follows the window: the largest zoom at which the whole width fits (up to 4×) */
   zoomFit = true;
@@ -73,6 +100,8 @@ export class Editor {
     { glyph: "", fg: "any", bg: "any", rGlyph: "", rFg: "keep", rBg: "keep" };
   /** cells highlighted by Find */
   found: { layerId: string; indices: number[] } | null = null;
+  /** the collaboration client while the app has one; the view asks it for other people's cursors */
+  joint: JointPresence | null = null;
 
   private listeners = new Map<EventName, Set<(arg?: unknown) => void>>();
 
@@ -103,26 +132,73 @@ export class Editor {
   chooseTool(tool: ToolId): boolean {
     const layer = this.active;
     if (!this.toolApplies(tool)) {
-      const kind = layer!.type === "font" ? "text" : layer!.type === "prose" ? "prose" : layer!.type === "reference" ? "reference" : "image";
+      const kind = layer!.type === "font" ? "text" : layer!.type === "prose" ? "prose" : layer!.type === "reference" ? "reference" : layer!.type === "shape" ? "shape" : "image";
       this.setStatus(layer!.type === "reference"
         ? `${TOOL_NAMES[tool]} doesn't work on a reference layer — it is only there to look at. Convert it to an image layer, or pick a cells layer.`
         : `${TOOL_NAMES[tool]} doesn't work on a live ${kind} layer — rasterize “${layer!.name}” to edit its cells, or pick a cells layer.`);
       return false;
     }
     if (tool !== "text" && this.prose.layer) this.prose.end();
+    if (!SHAPE_TOOLS.includes(tool)) this.pendingShape = false;
     this.tool = tool;
     this.toolBeforeAuto = null;   // a deliberate choice: nothing to come back to
     this.emit("ui");
     return true;
   }
 
-  /** Make a layer the active one; the tool follows if it has to. */
+  /** Make a layer the active one; the tool follows if it has to. A shape layer's character, colours and style become the brush's. */
   setActive(id: string): void {
     if (this.prose.layer && this.prose.layer.id !== id) this.prose.end();
     this.activeId = id;
     this.found = null;
+    this.loadShapeBrush();
     this.syncToolToLayer();
     this.emit("doc");
+  }
+
+  /** The brush and Shape panel show the selected shape layer, so they take its character, colours and style. */
+  private loadShapeBrush(): void {
+    const l = this.active;
+    if (l?.type !== "shape") return;
+    this.glyph = l.glyph; this.fg = l.fg;
+    if (l.bg !== null) this.bg = l.bg;
+    this.drawBg = l.bg !== null;
+    this.shapeStyle = l.style; this.shapeFill = l.fill;
+  }
+
+  /** the shape layer the brush and Shape panel are editing, if the active one is a shape */
+  private editableShape(): ShapeLayer | null {
+    const l = this.active;
+    return l?.type === "shape" && !l.locked ? l : null;
+  }
+
+  /** Set the brush. A selected shape layer takes the change too, undoably. */
+  setBrush(values: { glyph?: number; fg?: Color; bg?: Color }): void {
+    Object.assign(this, values);
+    const l = this.editableShape();
+    if (!l) { this.emit("ui"); return; }
+    const patch: Partial<ShapeLayer> = {};
+    if (values.glyph !== undefined) patch.glyph = values.glyph;
+    if (values.fg !== undefined) patch.fg = values.fg;
+    if (values.bg !== undefined) patch.bg = this.drawBg ? values.bg : null;
+    this.setProps("Shape brush", l, patch, () => refreshShapeLayer(l));
+  }
+
+  /** Turn a draw channel on or off; for a selected shape, the background channel is whether it has a background. */
+  setDrawChannel(key: "drawGlyph" | "drawFg" | "drawBg", on: boolean): void {
+    this[key] = on;
+    const l = this.editableShape();
+    if (l && key === "drawBg") this.setProps(on ? "Shape background" : "Shape see-through", l, { bg: on ? this.bg : null }, () => refreshShapeLayer(l));
+    else this.emit("ui");
+  }
+
+  /** The shape tools' outline and fill; a selected shape layer takes them too, undoably. */
+  setShapeOptions(values: { style?: ShapeStyle; fill?: ShapeFill }): void {
+    if (values.style) this.shapeStyle = values.style;
+    if (values.fill) this.shapeFill = values.fill;
+    const l = this.editableShape();
+    if (!l) { this.emit("ui"); return; }
+    this.setProps("Restyle shape", l, values, () => refreshShapeLayer(l));
   }
 
   /**
@@ -142,7 +218,7 @@ export class Editor {
     if (this.toolApplies(this.tool)) return;
     this.toolBeforeAuto ??= this.tool;
     this.tool = layer.type === "font" || layer.type === "prose" ? "text" : "move";
-    this.setStatus(`${TOOL_NAMES[this.tool]} tool: “${layer.name}” is a ${layer.type === "font" ? "live text" : layer.type === "prose" ? "prose" : layer.type === "reference" ? "reference" : "live image"} layer.`);
+    this.setStatus(`${TOOL_NAMES[this.tool]} tool: “${layer.name}” is a ${layer.type === "font" ? "live text" : layer.type === "prose" ? "prose" : layer.type === "reference" ? "reference" : layer.type === "shape" ? "live shape" : "live image"} layer.`);
   }
 
   setSelection(sel: Selection | null): void {
@@ -200,7 +276,11 @@ export class Editor {
   prose = new ProseEditing(this);
   private reflowing = false;
 
-  /** Prose layers that flow around other content depend on everything else: refresh them before compositing. */
+  /**
+   * Prose layers that flow around other content depend on everything else:
+   * refresh them before compositing. A shape layer without cells yet (an old
+   * file, or one built by hand) gets them here too.
+   */
   private reflowProse(): void {
     if (this.reflowing) return;
     this.reflowing = true;
@@ -208,6 +288,7 @@ export class Editor {
       const walk = (layers: Layer[]): void => layers.forEach((l) => {
         if (l.type === "group") walk(l.children);
         else if (l.type === "prose" && l.visible && (l.flowAround || !l.cache)) refreshProseLayer(this.doc, l, this.glyphs);
+        else if (l.type === "shape" && !l.cache) refreshShapeLayer(l);
       });
       walk(this.doc.layers);
     } finally { this.reflowing = false; }
@@ -269,6 +350,7 @@ export class Editor {
     this.found = null;
     if (!findLayer(this.doc.layers, this.activeId)) this.activeId = topContentLayer(this.doc.layers)?.id ?? "";
     this.syncToolToLayer();   // adding, deleting, rasterizing or undoing can change what the active layer is
+    this.loadShapeBrush();    // …and undo can change the selected shape under the panels
     this.recomposite();
     this.emit(structural ? "doc" : "ui");
   }

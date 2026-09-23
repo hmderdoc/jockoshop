@@ -1,7 +1,7 @@
 /** The native menu bar of the desktop shell. Everything here also has a button or a shortcut in the app. */
 export interface MenuActions {
-  newDocument(): void; open(): void; importLayer(): void; save(): void; saveAs(): void;
-  exportAns(): void; exportPng(): void; export3d(): void; exportMore(): void;
+  newDocument(): void; open(): void; importLayer(): void; save(): void; saveAs(): void; joint(): void;
+  exportAns(): void; exportPng(): void; exportWiggle(): void; export3d(): void; exportMore(): void;
   undo(): void; redo(): void;
   selectAll(): void; selectNone(): void; selectInverse(): void;
   copy(): void; cut(): void; paste(): void; deleteSel(): void;
@@ -23,8 +23,10 @@ export async function buildMenu(a: MenuActions): Promise<void> {
     await item("Import as Layer…", a.importLayer, "CmdOrCtrl+Shift+O"), await sep(),
     await item("Save", a.save, "CmdOrCtrl+S"),
     await item("Save As…", a.saveAs, "CmdOrCtrl+Shift+S"), await sep(),
+    await item("Joint…", a.joint, "CmdOrCtrl+J"), await sep(),
     await item("Export .ans…", a.exportAns, "CmdOrCtrl+E"),
     await item("Export .png…", a.exportPng),
+    await item("Export 3D wiggle .png (animated)…", a.exportWiggle),
     await item("Export for 3dBBS…", a.export3d),
     await item("Export As…", a.exportMore, "CmdOrCtrl+Shift+E"), await sep(),
     await PredefinedMenuItem.new({ item: "CloseWindow" }),

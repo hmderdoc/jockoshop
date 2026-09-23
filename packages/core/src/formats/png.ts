@@ -27,26 +27,69 @@ function chunk(type: string, body: Uint8Array): Uint8Array {
   return out;
 }
 
-/** 8-bit RGB PNG (the raster is always opaque). */
-export function encodePng(raster: Raster): Uint8Array {
-  const { width, height, data } = raster;
+const SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+function ihdr(width: number, height: number): Uint8Array {
   const head = new Uint8Array(13);
   const v = new DataView(head.buffer);
   v.setUint32(0, width);
   v.setUint32(4, height);
-  head[8] = 8; head[9] = 2;
+  head[8] = 8; head[9] = 2;   // 8-bit RGB
+  return head;
+}
+
+/** The raster's pixels as filtered (filter 0) RGB scanlines, deflated: an IDAT body. */
+function compressed(raster: Raster): Uint8Array {
+  const { width, height, data } = raster;
   const raw = new Uint8Array(height * (1 + width * 3));
   let o = 0, s = 0;
   for (let y = 0; y < height; y++) {
     raw[o++] = 0;
     for (let x = 0; x < width; x++) { raw[o++] = data[s++]; raw[o++] = data[s++]; raw[o++] = data[s++]; s++; }
   }
-  const parts = [
-    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", head), chunk("IDAT", zlibSync(raw, { level: 6 })), chunk("IEND", new Uint8Array(0)),
-  ];
+  return zlibSync(raw, { level: 6 });
+}
+
+function join(parts: Uint8Array[]): Uint8Array {
   const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
   let at = 0;
   for (const p of parts) { out.set(p, at); at += p.length; }
   return out;
+}
+
+/** 8-bit RGB PNG (the raster is always opaque). */
+export function encodePng(raster: Raster): Uint8Array {
+  return join([SIGNATURE, chunk("IHDR", ihdr(raster.width, raster.height)), chunk("IDAT", compressed(raster)), chunk("IEND", new Uint8Array(0))]);
+}
+
+/**
+ * Animated PNG: every frame a full, opaque picture of the same size, shown for
+ * `delayMs` each, looping `plays` times (0 = forever). The first frame is the
+ * ordinary image, so a viewer that doesn't animate shows it.
+ */
+export function encodeApng(frames: readonly Raster[], delayMs: number, plays = 0): Uint8Array {
+  if (!frames.length) throw new Error("an animation needs at least one frame");
+  const { width, height } = frames[0];
+  if (frames.some((f) => f.width !== width || f.height !== height)) throw new Error("animation frames must all be the same size");
+  const u32 = (...values: number[]): Uint8Array => {
+    const out = new Uint8Array(values.length * 4), v = new DataView(out.buffer);
+    values.forEach((n, i) => v.setUint32(i * 4, n));
+    return out;
+  };
+  const delay = Math.max(1, Math.round(delayMs));
+  let seq = 0;
+  const parts = [SIGNATURE, chunk("IHDR", ihdr(width, height)), chunk("acTL", u32(frames.length, plays))];
+  frames.forEach((f, i) => {
+    // fcTL: sequence, size, offset, delay as a fraction (ms / 1000), dispose none, blend source
+    const ctl = new Uint8Array(26);
+    ctl.set(u32(seq++, width, height, 0, 0));
+    new DataView(ctl.buffer).setUint16(20, delay);
+    new DataView(ctl.buffer).setUint16(22, 1000);
+    parts.push(chunk("fcTL", ctl));
+    const body = compressed(f);
+    if (i === 0) parts.push(chunk("IDAT", body));
+    else parts.push(chunk("fdAT", join([u32(seq++), body])));
+  });
+  parts.push(chunk("IEND", new Uint8Array(0)));
+  return join(parts);
 }

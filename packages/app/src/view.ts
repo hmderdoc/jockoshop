@@ -1,6 +1,6 @@
 import { type Layer, type Raster, type Rect, createRaster, hasBlink, layerSize, renderGrid } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
-import { type Pointer, type Tool, handleAt, pickUp } from "./tools.js";
+import { type Pointer, type Tool, pickUp } from "./tools.js";
 
 /** The art canvas, an overlay for cursors and previews, and pointer routing to the active tool. */
 export class CanvasView {
@@ -126,7 +126,7 @@ export class CanvasView {
     const ch = this.raster.cellHeight;
     return {
       x: Math.floor(px / this.raster.cellWidth), y: Math.floor(py / ch),
-      hy: Math.floor(py / (ch / 2)), button, shift: e.shiftKey, alt: e.altKey,
+      hy: Math.floor(py / (ch / 2)), px, py, button, shift: e.shiftKey, alt: e.altKey,
     };
   }
 
@@ -213,14 +213,21 @@ export class CanvasView {
         ctx.strokeStyle = "rgba(90,200,255,.7)";
         ctx.strokeRect(l.x * cw + 0.5, l.y * ch + 0.5, g.width * cw - 1, g.height * ch - 1);
         ctx.setLineDash([]);
-        // resize handles for the Move tool: image layers on the corner and edges, text layers on the right edge
-        if (this.tools().id === "move" && l.type !== "cells" && !l.locked) {
-          const x1 = (l.x + g.width) * cw, y1 = (l.y + g.height) * ch, s = Math.max(6, 4 * z);
-          const knob = (x: number, y: number): void => { ctx.fillStyle = "#fff"; ctx.fillRect(x - s / 2, y - s / 2, s, s); ctx.strokeStyle = "#000"; ctx.strokeRect(x - s / 2 + 0.5, y - s / 2 + 0.5, s - 1, s - 1); };
-          const midY = (l.y + g.height / 2) * ch, midX = (l.x + g.width / 2) * cw;
-          knob(x1, midY);
-          if (l.type === "image") { knob(midX, y1); knob(x1, y1); }
-        }
+      }
+    }
+
+    // free-transform handles: the framed box and its knobs (Move tool; the shape tools on a shape layer)
+    const handles = this.tools().handles?.();
+    if (handles) {
+      const b = handles.box, s = Math.max(7, 4 * z);
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = "rgba(255,255,255,.8)";
+      ctx.strokeRect(b.x * cw + 0.5, b.y * ch + 0.5, b.width * cw - 1, b.height * ch - 1);
+      ctx.setLineDash([]);
+      for (const k of handles.knobs) {
+        const x = k.px * z, y = k.py * z;
+        ctx.fillStyle = "#fff"; ctx.fillRect(x - s / 2, y - s / 2, s, s);
+        ctx.strokeStyle = "#000"; ctx.strokeRect(x - s / 2 + 0.5, y - s / 2 + 0.5, s - 1, s - 1);
       }
     }
 
@@ -278,6 +285,7 @@ export class CanvasView {
     const tool = this.tools();
     ctx.fillStyle = "rgba(255,255,255,.35)";
     for (const [x, y] of tool.preview?.() ?? []) ctx.fillRect(x * cw, y * ch, cw, ch);
+    for (const [x, hy] of tool.previewHalf?.() ?? []) ctx.fillRect(x * cw, hy * (ch / 2), cw, ch / 2);
 
     const caret = tool.caret?.();
     if (caret) {
@@ -287,8 +295,25 @@ export class CanvasView {
 
     if (this.hover) {
       ctx.strokeStyle = "rgba(255,255,255,.9)";
-      if (tool.id === "half") ctx.strokeRect(this.hover.x * cw + 0.5, this.hover.hy * (ch / 2) + 0.5, cw - 1, ch / 2 - 1);
-      else ctx.strokeRect(this.hover.x * cw + 0.5, this.hover.y * ch + 0.5, cw - 1, ch - 1);
+      const fp = tool.footprint?.(this.hover);
+      const rh = fp?.half ? ch / 2 : ch;
+      for (const [x, y] of fp?.cells ?? [[this.hover.x, this.hover.y]]) ctx.strokeRect(x * cw + 0.5, y * rh + 0.5, cw - 1, rh - 1);
+    }
+
+    // the other people in a joint: their cell, in their own colour, with their nick over it
+    for (const c of this.ed.joint?.cursors() ?? []) {
+      const x = c.x * cw, y = c.y * ch;
+      ctx.strokeStyle = c.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x + 1, y + 1, cw - 2, ch - 2);
+      ctx.lineWidth = 1;
+      ctx.font = "10px system-ui, sans-serif";
+      ctx.textBaseline = "bottom";
+      const w = ctx.measureText(c.nick).width + 4;
+      ctx.fillStyle = c.color;
+      ctx.fillRect(x, Math.max(0, y - 12), w, 12);
+      ctx.fillStyle = "#000";
+      ctx.fillText(c.nick, x + 2, Math.max(0, y - 12) + 11);
     }
   }
 }

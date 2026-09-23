@@ -151,7 +151,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
     });
   };
 
-  const typeIcon = (l: Layer): SVGSVGElement => icon(l.type === "cells" ? "cells" : l.type === "font" ? "text" : l.type === "image" ? "image" : l.type === "prose" ? "prose" : l.type === "reference" ? "reference" : "group", 15);
+  const typeIcon = (l: Layer): SVGSVGElement => icon(l.type === "cells" ? "cells" : l.type === "font" ? "text" : l.type === "image" ? "image" : l.type === "prose" ? "prose" : l.type === "reference" ? "reference" : l.type === "shape" ? "shape" : "group", 15);
 
   const row = (l: Layer, depth: number): HTMLElement[] => {
     const el = h(`div.layer${l.id === ed.activeId ? ".active" : ""}${l.visible ? "" : ".off"}${l.type === "reference" ? ".ref" : ""}`, {
@@ -160,9 +160,10 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
     iconButton(l.visible ? "eye" : "eyeOff", l.visible ? "Hide layer" : "Show layer", {
       class: "bare", onclick: (e) => { e.stopPropagation(); ed.setProps(l.visible ? "Hide layer" : "Show layer", l, { visible: !l.visible }); },
     }),
-    h("span.kind", { title: l.type === "font" ? "live TheDraw text" : l.type === "image" ? "live image" : l.type === "prose" ? "reflowing prose" : l.type === "reference" ? "reference image (not exported)" : l.type }, typeIcon(l)),
+    h("span.kind", { title: l.type === "font" ? "live TheDraw text" : l.type === "image" ? "live image" : l.type === "prose" ? "reflowing prose" : l.type === "reference" ? "reference image (not exported)" : l.type === "shape" ? "live shape" : l.type }, typeIcon(l)),
     h("span.name", { title: "Double-click to rename", ondblclick: () => { const name = prompt("Layer name", l.name); if (name) ed.setProps("Rename layer", l, { name }); } }, l.name),
     l.type === "reference" && h("span.tag", { title: "Reference image: shown to draw from, never part of the picture" }, "ref"),
+    l.type !== "group" && l.joint === "remote" && h("span.tag.joint", { title: "Where the other people in the joint draw. Yours goes underneath; leaving the joint makes it an ordinary layer." }, "joint"),
     l.type !== "group" && l.keys.some((k) => k.enabled) && h("span.tag.key", { title: "Has key rules" }, "key"),
     l.type !== "group" && l.mask?.enabled && h("span.tag.key", { title: "Has a mask" }, "mask"),
     l.type !== "group" && !isIdentityRemap(l.remap) && h("span.tag.key", { title: "Palette swap" }, "pal"),
@@ -194,6 +195,11 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
         ed.addLayer(layer, "Add prose layer");
         ed.chooseTool("text");
         ed.prose.begin(layer);
+      }),
+      addItem("shape", "Shape", "live line, box or ellipse: drag it", () => {
+        ed.pendingShape = true;
+        if (!["line", "rect", "ellipse"].includes(ed.tool)) ed.chooseTool("rect");
+        ed.setStatus("Drag out the shape — a rectangle (R), line (L) or ellipse (O) — and it becomes a live layer you can reshape and restyle.");
       }),
       addItem("image", "Image…", "converted by shadeans, kept editable", async () => {
         const file = await pickFile("image/png,image/jpeg,image/gif,image/webp,image/bmp");

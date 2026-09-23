@@ -1,15 +1,16 @@
 /** Modal dialogs: SAUCE, scale a layer, canvas size lives in main.ts. */
 import {
-  type CellsLayer, type ContentLayer, type KdDocument, SHADEANS_DEFAULTS, type Sauce, createRaster, flipCells,
-  layerGrid, renderGrid, scaleCellsNearest,
+  type CellsLayer, type ContentLayer, type KdDocument, type Raster, SHADEANS_DEFAULTS, type Sauce, createRaster, depthToPd,
+  deviceShiftPx, encodeApng, flipCells, layerGrid, planDepth, renderDepthView, renderGrid, scaleCellsNearest,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 import { convertPixels } from "./shadeans.js";
-import { field, h, numberInput } from "./ui.js";
+import { download, field, h, numberInput } from "./ui.js";
 
-function modal(title: string, body: HTMLElement[], buttons: HTMLElement[]): HTMLElement {
+/** A dialog box over a backdrop that closes on a click outside it. Returns the backdrop, to `remove()`. */
+export function modal(title: string, body: HTMLElement[], buttons: HTMLElement[], width = 520): HTMLElement {
   const backdrop = h("div.backdrop", { onclick: (e: Event) => { if (e.target === backdrop) backdrop.remove(); } },
-    h("div.dialog", { style: "width:520px" }, h("h3", {}, title), ...body, h("div.row.end", {}, ...buttons)));
+    h("div.dialog", { style: `width:${width}px` }, h("h3", {}, title), ...body, h("div.row.end", {}, ...buttons)));
   document.body.append(backdrop);
   return backdrop;
 }
@@ -93,6 +94,86 @@ export function scaleDialog(ed: Editor, layer: CellsLayer): void {
     status,
   ], [h("button", { onclick: close }, "Cancel"), h("button.primary", { onclick: () => void apply() }, "Scale")]);
   wIn.input.focus();
+}
+
+/** A raster blown up by a whole factor, nearest-neighbour: crisp pixels for sharing. */
+function scaleRaster(r: Raster, k: number): Raster {
+  if (k === 1) return r;
+  const out: Raster = { width: r.width * k, height: r.height * k, cellWidth: r.cellWidth * k, cellHeight: r.cellHeight * k, data: new Uint8ClampedArray(r.width * k * r.height * k * 4) };
+  for (let y = 0; y < out.height; y++) {
+    const sy = Math.floor(y / k);
+    for (let x = 0; x < out.width; x++) {
+      const s = (sy * r.width + Math.floor(x / k)) * 4, d = (y * out.width + x) * 4;
+      out.data[d] = r.data[s]; out.data[d + 1] = r.data[s + 1]; out.data[d + 2] = r.data[s + 2]; out.data[d + 3] = 255;
+    }
+  }
+  return out;
+}
+
+/**
+ * Export the depth layers as an animated PNG that rocks between the two eyes'
+ * views. The dialog animates exactly what will be saved, so the separation,
+ * motion, frame count, speed and size can be tuned first.
+ */
+export function wiggleDialog(ed: Editor, baseName: string): void {
+  const opts = { strength: 100, frames: 24, delay: 68, motion: "swing" as "swing" | "flip", scale: 1 };
+  let frames: Raster[] = [], playing = 0, at = 0, lastTick = 0;
+  const preview = h("canvas.wiggle-preview");
+  const info = h("p.hint");
+  const comp = ed.comp, plan = planDepth(comp);
+  const flat = plan.levels.every((d) => d === 0);
+  const opt = { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px };
+
+  const eye = (e: number): Raster => {
+    const r = createRaster(ed.doc.width, ed.doc.height, ed.font, ed.doc.letterSpacing9px);
+    renderDepthView(comp, plan, ed.font, r, e * deviceShiftPx(1e9, opts.strength / 100), opt);
+    return scaleRaster(r, opts.scale);
+  };
+  const rebuild = (): void => {
+    // a flip is the classic two-frame wigglegram; a swing eases through the views in between
+    frames = opts.motion === "flip" ? [eye(-1), eye(1)] : Array.from({ length: opts.frames }, (_, k) => eye(Math.sin((2 * Math.PI * k) / opts.frames)));
+    at = 0;
+    const w = frames[0].width, hgt = frames[0].height;
+    if (preview.width !== w || preview.height !== hgt) { preview.width = w; preview.height = hgt; }
+    const apart = 2 * Math.abs(deviceShiftPx(depthToPd(Math.max(...plan.levels.map((d) => Math.abs(d)), 0)), opts.strength / 100));
+    info.textContent = flat ? "Every layer is at the glass, so nothing will move: give a layer some depth first (Layer panel, right)."
+      : `${frames.length} frames of ${w}×${hgt}, ${frames.length * opts.delay} ms per cycle; the deepest layer shifts ${apart.toFixed(0)} px between the two views.`;
+  };
+  const tick = (now: number): void => {
+    if (now - lastTick >= opts.delay) { lastTick = now; at = (at + 1) % frames.length; }
+    const f = frames[at];
+    preview.getContext("2d")!.putImageData(new ImageData(f.data as Uint8ClampedArray<ArrayBuffer>, f.width, f.height), 0, 0);
+    playing = requestAnimationFrame(tick);
+  };
+
+  const slider = (label: string, key: "strength" | "frames" | "delay", min: number, max: number, step: number, unit: string, title: string): HTMLElement => {
+    const readout = h("span.muted", {}, `${opts[key]}${unit}`);
+    const input = h("input", { type: "range", min, max, step, value: String(opts[key]), title, oninput: () => { opts[key] = Number(input.value); readout.textContent = `${opts[key]}${unit}`; rebuild(); } });
+    return h("label.slider", { title }, h("span", {}, label), input, readout);
+  };
+  const motionSel = h("select", { title: "Swing eases between the two views and back; flip alternates them, like a two-frame wigglegram", onchange: () => { opts.motion = motionSel.value as typeof opts.motion; framesRow.hidden = opts.motion === "flip"; rebuild(); } },
+    h("option", { value: "swing" }, "swing"), h("option", { value: "flip" }, "flip"));
+  const scaleSel = h("select", { title: "Whole-pixel enlargement, so the characters stay crisp", onchange: () => { opts.scale = Number(scaleSel.value); rebuild(); } },
+    h("option", { value: "1" }, "1×"), h("option", { value: "2" }, "2×"), h("option", { value: "3" }, "3×"));
+  const framesRow = slider("frames", "frames", 4, 48, 2, "", "Frames in one swing: more is smoother and bigger");
+  const close = (): void => { cancelAnimationFrame(playing); backdrop.remove(); };
+  const save = (): void => {
+    const bytes = encodeApng(frames, opts.delay);
+    download(`${baseName}-wiggle.png`, bytes, "image/png");
+    ed.setStatus(`Saved ${frames.length} frames (${(bytes.length / 1024).toFixed(0)} KB).`);
+    close();
+  };
+  const backdrop = modal("3D wiggle .png", [
+    h("p.hint", {}, "An animated PNG that rocks between the two eyes' views of the depth layers. This preview is exactly what will be saved."),
+    h("div.wiggle-box", {}, preview),
+    slider("separation", "strength", 0, 200, 5, "%", "How far the depth layers shift between the views: 100% is the 3DS at full slider; more exaggerates it"),
+    h("div.row", {}, field("motion", motionSel), field("size", scaleSel)),
+    framesRow,
+    slider("speed", "delay", 30, 250, 2, " ms", "How long each frame shows"),
+    info,
+  ], [h("button", { onclick: close }, "Cancel"), h("button.primary", { onclick: save }, "Save .png")]);
+  rebuild();
+  playing = requestAnimationFrame(tick);
 }
 
 export type { ContentLayer };

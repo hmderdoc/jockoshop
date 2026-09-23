@@ -1,11 +1,48 @@
 import { describe, expect, it } from "vitest";
-import { CellGrid, ellipseCells, flipCells, mirrorGlyph, scaleCellsNearest } from "../src/index.js";
+import { CP437_UNICODE, CellGrid, boxCells, ellipseCells, flipCells, lineCells, lineGlyph, mirrorGlyph, rectCells, rectInterior, scaleCellsNearest } from "../src/index.js";
 
 const draw = (w: number, h: number, cells: [number, number][]): string[] => {
   const rows = Array.from({ length: h }, () => Array.from({ length: w }, () => "."));
   for (const [x, y] of cells) rows[y][x] = "#";
   return rows.map((r) => r.join(""));
 };
+
+describe("lines and rectangles", () => {
+  it("a line includes both ends and takes the corners in any order", () => {
+    expect(lineCells(0, 0, 3, 1)).toEqual([[0, 0], [1, 0], [2, 1], [3, 1]]);
+    expect(lineCells(3, 1, 0, 0).length).toBe(4);
+    expect(lineCells(2, 2, 2, 2)).toEqual([[2, 2]]);
+  });
+
+  it("a rectangle is its outline, or everything, and its interior is what is left", () => {
+    expect(draw(4, 3, rectCells(3, 2, 0, 0, false))).toEqual(["####", "#..#", "####"]);
+    expect(draw(4, 3, rectCells(0, 0, 3, 2, true))).toEqual(["####", "####", "####"]);
+    expect(rectInterior(0, 0, 3, 2)).toEqual([[1, 1], [2, 1]]);
+    expect(rectInterior(0, 0, 3, 1)).toEqual([]);
+    expect(rectCells(1, 1, 1, 1, false)).toEqual([[1, 1]]);
+  });
+
+  it("box drawing uses the right corners and edges, and degenerates to a run", () => {
+    const text = (w: number, h: number, cells: [number, number, number][]): string[] => {
+      const rows = Array.from({ length: h }, () => Array.from({ length: w }, () => " "));
+      for (const [x, y, g] of cells) rows[y][x] = String.fromCodePoint(CP437_UNICODE[g]);
+      return rows.map((r) => r.join(""));
+    };
+    expect(text(4, 3, boxCells(3, 2, 0, 0, "single"))).toEqual(["┌──┐", "│  │", "└──┘"]);
+    expect(text(4, 3, boxCells(0, 0, 3, 2, "double"))).toEqual(["╔══╗", "║  ║", "╚══╝"]);
+    expect(text(4, 1, boxCells(0, 0, 3, 0, "single"))).toEqual(["────"]);
+    expect(text(1, 3, boxCells(0, 0, 0, 2, "double"))).toEqual(["║", "║", "║"]);
+    expect(boxCells(2, 2, 2, 2, "single")).toEqual([[2, 2, 179]]);
+    expect(boxCells(0, 0, 3, 2, "single").length).toBe(10);   // no cell twice
+  });
+
+  it("a straight line gets a box-drawing edge; a diagonal keeps the brush", () => {
+    expect(lineGlyph(0, 5, 9, 5, "single", 219)).toBe(196);
+    expect(lineGlyph(4, 0, 4, 9, "double", 219)).toBe(186);
+    expect(lineGlyph(0, 0, 5, 5, "single", 219)).toBe(219);
+    expect(lineGlyph(3, 3, 3, 3, "single", 219)).toBe(219);
+  });
+});
 
 describe("ellipse", () => {
   it("draws a closed outline that touches all four sides", () => {

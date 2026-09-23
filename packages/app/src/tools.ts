@@ -1,11 +1,11 @@
 import {
   CH_BG, CH_FG, CH_GLYPH, type CellGrid, type CellsLayer, type Color, type Command, type ContentLayer, GlyphClass,
-  type FontLayer, GridEdit, type ImageLayer, type ProseLayer, type Rect, type SelectMode, Selection, cellPatchCommand,
-  type ReferenceLayer, colorsEqual, cp437Encode, createProseLayer, ellipseCells, groupCommand, isHigh, layerGrid, layerSize,
-  mirrorGlyph, refreshFontLayer, refreshProseLayer, selectWand,
+  GridEdit, type Rect, type SelectMode, Selection, cellPatchCommand,
+  type ShapeKind, type ShapeLayer, type ShapePlan, colorsEqual, cp437Encode, createProseLayer, createShapeLayer,
+  groupCommand, isHigh, layerGrid, lineCells, mirrorGlyph, planShapeCells, refreshShapeLayer, selectWand,
 } from "@killerdraw/core";
-import type { Editor, ToolId } from "./editor.js";
-import { commitImage, scheduleImageRefresh, snapshotImage } from "./shadeans.js";
+import type { BrushMode, Editor, ShapeFill, ToolId } from "./editor.js";
+import { Transformer, growToCanvas } from "./transform.js";
 
 export interface Pointer {
   /** document cell */
@@ -13,6 +13,9 @@ export interface Pointer {
   y: number;
   /** document row in half-cell units (2 per cell) */
   hy: number;
+  /** document pixels (unzoomed), for hitting handles */
+  px: number;
+  py: number;
   button: number;
   shift: boolean;
   alt: boolean;
@@ -28,6 +31,12 @@ export interface Tool {
   up(p: Pointer): void;
   /** document cells to outline while the tool is mid-gesture */
   preview?(): [number, number][];
+  /** the same, in half-row units (x, hy) — a shape being drawn in half blocks */
+  previewHalf?(): [number, number][];
+  /** the cells (or half cells) the tool would touch at this position, when that is more than the one under the pointer */
+  footprint?(p: Pointer): { cells: [number, number][]; half: boolean } | null;
+  /** free-transform handles to draw: the framed box and its knobs (document pixels) */
+  handles?(): { box: Rect; knobs: { px: number; py: number }[] } | null;
   keydown?(e: KeyboardEvent): boolean;
   /** document cell of a text caret, if the tool has one */
   caret?(): [number, number] | null;
@@ -40,25 +49,6 @@ export interface Tool {
   typeGlyph?(code: number): boolean;
 }
 
-export type Handle = "corner" | "right" | "bottom";
-
-/**
- * Which resize handle of the active layer is under a cell, if any. Image
- * layers resize on the corner and both edges; text layers wrap on the right
- * edge; nothing else resizes.
- */
-export function handleAt(ed: Editor, x: number, y: number): Handle | null {
-  const l = ed.active;
-  if (!l || l.type === "group" || l.type === "cells") return null;
-  const g = layerSize(l);
-  if (!g || l.locked) return null;
-  const lx = x - l.x, ly = y - l.y;
-  if (lx < 0 || ly < 0 || lx >= g.width || ly >= g.height) return null;
-  const atRight = lx === g.width - 1, atBottom = ly === g.height - 1;
-  if (l.type === "image" || l.type === "prose" || l.type === "reference") return atRight && atBottom ? "corner" : atRight ? "right" : atBottom ? "bottom" : null;
-  return atRight ? "right" : null;
-}
-
 /** Put the caret in the text layer's text field (left sidebar), at the end of the text. */
 export function focusTextField(): void {
   setTimeout(() => {
@@ -67,21 +57,6 @@ export function focusTextField(): void {
     field.focus();
     field.setSelectionRange(field.value.length, field.value.length);
   });
-}
-
-/** Cells on a line between two points (Bresenham), both ends included. */
-export function lineCells(x0: number, y0: number, x1: number, y1: number): [number, number][] {
-  const out: [number, number][] = [];
-  const dx = Math.abs(x1 - x0), dy = -Math.abs(y1 - y0), sx = x0 < x1 ? 1 : -1, sy = y0 < y1 ? 1 : -1;
-  let err = dx + dy;
-  for (;;) {
-    out.push([x0, y0]);
-    if (x0 === x1 && y0 === y1) break;
-    const e2 = 2 * err;
-    if (e2 >= dy) { err += dy; x0 += sx; }
-    if (e2 <= dx) { err += dx; y0 += sy; }
-  }
-  return out;
 }
 
 /**
@@ -94,31 +69,7 @@ export class Stroke {
   private dirty: Rect | null = null;
 
   private constructor(private ed: Editor, readonly layer: CellsLayer) {
-    const doc = ed.doc, g = layer.grid;
-    const x0 = Math.min(0, -layer.x), y0 = Math.min(0, -layer.y);
-    const x1 = Math.max(g.width, doc.width - layer.x), y1 = Math.max(g.height, doc.height - layer.y);
-    if (x0 < 0 || y0 < 0 || x1 > g.width || y1 > g.height) {
-      const old = g, grown = g.reframed({ x: x0, y: y0, width: x1 - x0, height: y1 - y0 });
-      // a mask is in layer coordinates, so it has to move with the layer's origin
-      const oldMask = layer.mask, m = oldMask;
-      let grownMask = oldMask;
-      if (m) {
-        const data = new Uint8Array(grown.width * grown.height);
-        for (let y = 0; y < m.height; y++) {
-          for (let x = 0; x < m.width; x++) {
-            const nx = x - x0, ny = y - y0;
-            if (nx >= 0 && ny >= 0 && nx < grown.width && ny < grown.height) data[ny * grown.width + nx] = m.data[y * m.width + x];
-          }
-        }
-        grownMask = { width: grown.width, height: grown.height, data, enabled: m.enabled };
-      }
-      this.grow = {
-        label: "Grow layer",
-        redo: () => { layer.grid = grown; layer.mask = grownMask; layer.x += x0; layer.y += y0; },
-        undo: () => { layer.grid = old; layer.mask = oldMask; layer.x -= x0; layer.y -= y0; },
-      };
-      this.grow.redo();
-    }
+    this.grow = growToCanvas(ed, layer);
     this.edit = new GridEdit(layer.grid);
   }
 
@@ -212,11 +163,91 @@ function paintHalf(ed: Editor, s: Stroke, lx: number, ly: number, lower: boolean
   else s.edit.set(lx, ly, { glyph: 220, fg: lo });
 }
 
+const BRUSH_HINTS: Record<BrushMode, string> = {
+  half: "Half-block pixels: left button paints the foreground colour, right the background. Alt-click picks up a cell.",
+  char: "The brush character in the brush colours (see the char / fg / bg switches). Right button erases. Alt-click picks up a cell.",
+  shade: "Shading: each stroke steps a cell up the ░ ▒ ▓ █ ramp in the brush colours; right button steps it back down.",
+  colorize: "Colours only: the characters stay, the foreground and/or background (see the switches) take the brush colours.",
+};
+const BRUSH_LABELS: Record<BrushMode, string> = { half: "Half block", char: "Brush", shade: "Shade", colorize: "Colorize" };
+
+/** Moebius's shade ramp: a stroke steps a cell up it (or down, with `reduce`); a full block of another colour restarts at ░. */
+const SHADES = [32, 176, 177, 178, 219];
+function shadeCell(ed: Editor, s: Stroke, lx: number, ly: number, reduce: boolean): void {
+  const g = s.layer.grid;
+  if (!g.inBounds(lx, ly)) return;
+  const c = g.get(lx, ly), glyph = c.present & CH_GLYPH ? c.glyph : 32;
+  const sameFg = !!(c.present & CH_FG) && c.fg === ed.fg;
+  let i = SHADES.indexOf(glyph);
+  if (reduce) {
+    if (i <= 0 || (glyph === 219 && !sameFg)) return;
+    i--;
+  } else {
+    if (glyph === 219) { if (sameFg) return; i = 1; }
+    else i = i < 0 ? 1 : Math.min(SHADES.length - 1, i + 1);
+  }
+  s.edit.set(lx, ly, { glyph: SHADES[i], fg: ed.fg, bg: ed.bg });
+}
+
+/** One dab of the brush at a cell (or, in half-block mode, a half row) in the current mode. */
+function paintBrush(ed: Editor, s: Stroke, x: number, y: number, p: Pointer): void {
+  const mode = ed.brushMode;
+  if (mode === "half") { s.at(x, y >> 1, (lx, ly) => paintHalf(ed, s, lx, ly, (y & 1) === 1, p.button === 2 ? ed.bg : ed.fg)); return; }
+  s.at(x, y, (lx, ly) => {
+    if (mode === "char") { if (p.button === 2) s.edit.clear(lx, ly); else s.edit.set(lx, ly, brushCell(ed)); }
+    else if (mode === "shade") shadeCell(ed, s, lx, ly, p.button === 2);
+    else s.edit.set(lx, ly, { ...(ed.drawFg ? { fg: ed.fg } : {}), ...(ed.drawBg ? { bg: ed.bg } : {}) });
+  });
+}
+
+/** The offsets a brush of the current size covers, centred on the pointer (a size-2 brush hangs down and right, as in Moebius). */
+function brushOffsets(ed: Editor): number[] {
+  const n = Math.max(1, ed.brushSize), o = -Math.floor(n / 2);
+  return Array.from({ length: n }, (_, i) => o + i);
+}
+
+/** The fill a shape gesture asks for: the panel's choice, or Shift for a character fill in a hollow shape. */
+function shapeFillFor(ed: Editor, kind: ShapeKind, p: Pointer): ShapeFill {
+  return kind === "line" ? "none" : p.shift && ed.shapeFill === "none" ? "char" : ed.shapeFill;
+}
+
+/**
+ * The shape tools paint cells on a cells layer; anywhere else (a shape layer,
+ * live text, an image, or after "Add layer → Shape") the drag places a live shape layer.
+ */
+function shapeIsVector(ed: Editor): boolean {
+  return ed.pendingShape || ed.active?.type !== "cells";
+}
+
+/**
+ * What a shape tool would draw between two pointer positions (see
+ * planShapeCells). Painted cells in half-block style follow the pointer's
+ * half rows; a shape layer's box is whole cells, so then the half rows are
+ * the cells' own — the same thing the layer will render.
+ */
+function planShape(ed: Editor, kind: ShapeKind, a: Pointer, b: Pointer): ShapePlan {
+  const half = ed.shapeStyle === "half";
+  let y0 = half ? a.hy : a.y, y1 = half ? b.hy : b.y;
+  if (half && shapeIsVector(ed)) { y0 = a.y * 2 + (a.y <= b.y ? 0 : 1); y1 = b.y * 2 + (b.y >= a.y ? 1 : 0); }
+  return planShapeCells(kind, a.x, y0, b.x, y1, ed.shapeStyle, shapeFillFor(ed, kind, b));
+}
+
+/** A live layer for the shape dragged from `a` to `b`, styled and coloured like the brush. */
+function shapeLayerFor(ed: Editor, kind: ShapeKind, a: Pointer, b: Pointer): ShapeLayer {
+  const layer = createShapeLayer(kind, Math.abs(b.x - a.x) + 1, Math.abs(b.y - a.y) + 1);
+  layer.x = Math.min(a.x, b.x); layer.y = Math.min(a.y, b.y);
+  layer.flip = kind === "line" && (b.x - a.x) * (b.y - a.y) < 0;
+  layer.style = ed.shapeStyle; layer.fill = shapeFillFor(ed, kind, b);
+  layer.glyph = ed.glyph; layer.fg = ed.fg; layer.bg = ed.drawBg ? ed.bg : null;
+  refreshShapeLayer(layer);
+  return layer;
+}
+
 export function createTools(ed: Editor): Tool[] {
   let stroke: Stroke | null = null;
   let last: Pointer | null = null;
   let anchor: Pointer | null = null;
-  let current: Pointer | null = null;
+  let plan: ShapePlan | null = null;
 
   const freehand = (id: ToolId, label: string, key: string, hint: string, useHalf: boolean,
     paint: (s: Stroke, x: number, y: number, p: Pointer) => void): Tool => ({
@@ -225,44 +256,72 @@ export function createTools(ed: Editor): Tool[] {
     move(p) {
       if (!stroke || !last) return;
       const pts = useHalf ? lineCells(last.x, last.hy, p.x, p.hy) : lineCells(last.x, last.y, p.x, p.y);
-      for (const [x, y] of pts) paint(stroke, x, y, p);
+      const off = brushOffsets(ed);
+      for (const [x, y] of pts) for (const dy of off) for (const dx of off) paint(stroke, x + dx, y + dy, p);
       stroke.flush();
       last = p;
     },
     up() { stroke?.end(label); stroke = null; last = null; },
+    footprint(p) {
+      const off = brushOffsets(ed), y = useHalf ? p.hy : p.y;
+      return { cells: off.flatMap((dy) => off.map((dx): [number, number] => [p.x + dx, y + dy])), half: useHalf };
+    },
   });
 
-  const shape = (id: ToolId, label: string, key: string, hint: string,
-    cells: (a: Pointer, b: Pointer) => [number, number][]): Tool => ({
+  const xf = new Transformer(ed);
+  const onShape = (): boolean => ed.active?.type === "shape";
+
+  const shape = (id: ToolId, kind: ShapeKind, label: string, key: string, hint: string): Tool => ({
     id, label, key, hint,
-    down(p) { if (ed.drawable()) { anchor = p; current = p; } },
-    move(p) { if (anchor) { current = p; ed.emit("ui"); } },
+    down(p) {
+      // on a shape layer the handles reshape it and its inside moves it; outside it, a new shape
+      const hit = onShape() ? xf.hit(p) : null;
+      if (hit) { xf.begin(p, hit); return; }
+      if (shapeIsVector(ed) || ed.drawable()) { anchor = p; plan = planShape(ed, kind, p, p); }
+    },
+    move(p) {
+      if (xf.active) { xf.drag(p); return; }
+      if (anchor) { plan = planShape(ed, kind, anchor, p); ed.emit("ui"); }
+    },
     up(p) {
+      if (xf.active) { xf.end(p); return; }
       if (!anchor) return;
-      const s = Stroke.begin(ed);
+      if (shapeIsVector(ed)) {
+        const layer = shapeLayerFor(ed, kind, anchor, p);
+        anchor = plan = null;
+        ed.pendingShape = false;
+        ed.addLayer(layer, `Add ${layer.name.toLowerCase()} layer`);
+        ed.setStatus(`“${layer.name}” is a live shape: drag its handles to reshape it, inside to move it; the panels on the left restyle it. Rasterize it (right) for cells.`);
+        return;
+      }
+      const s = Stroke.begin(ed), sh = planShape(ed, kind, anchor, p);
       if (s) {
-        const brush = brushCell(ed);
-        for (const [x, y] of cells(anchor, p)) s.at(x, y, (lx, ly) => s.edit.set(lx, ly, brush));
+        if (sh.half) {
+          // half-block style: left button paints the foreground colour, right the background, as the half-block brush does
+          const color = p.button === 2 ? ed.bg : ed.fg;
+          for (const [x, hy] of [...sh.fill, ...sh.outline]) s.at(x, hy >> 1, (lx, ly) => paintHalf(ed, s, lx, ly, (hy & 1) === 1, color));
+        } else {
+          const brush = brushCell(ed);
+          // a "colour" fill is a flat background: a space in the brush colours (with the character channel off, it only recolours)
+          const inside = shapeFillFor(ed, kind, p) === "color" ? { ...brush, ...(ed.drawGlyph ? { glyph: 32 } : {}) } : brush;
+          for (const [x, y] of sh.fill) s.at(x, y, (lx, ly) => s.edit.set(lx, ly, inside));
+          for (const [x, y, g] of sh.outline) {
+            const cell = g !== undefined && ed.drawGlyph ? { ...brush, glyph: g } : brush;
+            s.at(x, y, (lx, ly) => s.edit.set(lx, ly, cell));
+          }
+        }
         s.end(label);
       }
-      anchor = current = null;
+      anchor = plan = null;
       ed.emit("ui");
     },
-    preview: () => (anchor && current ? cells(anchor, current) : []),
+    preview: () => (plan && !plan.half ? [...plan.fill, ...plan.outline.map(([x, y]): [number, number] => [x, y])] : []),
+    previewHalf: () => (plan?.half ? [...plan.fill, ...plan.outline.map(([x, y]): [number, number] => [x, y])] : []),
+    footprint: (p) => (ed.shapeStyle === "half" && !(onShape() && xf.hit(p)) ? { cells: [[p.x, p.hy]], half: true } : null),
+    handles: () => (onShape() ? xf.handles() : null),
+    cursor: (p) => (onShape() ? xf.cursor(xf.hit(p)) : null),
   });
 
-  const rectCells = (a: Pointer, b: Pointer): [number, number][] => {
-    const x0 = Math.min(a.x, b.x), x1 = Math.max(a.x, b.x), y0 = Math.min(a.y, b.y), y1 = Math.max(a.y, b.y);
-    const out: [number, number][] = [];
-    for (let y = y0; y <= y1; y++) {
-      for (let x = x0; x <= x1; x++) if (b.shift || x === x0 || x === x1 || y === y0 || y === y1) out.push([x, y]);
-    }
-    return out;
-  };
-
-  // move tool state
-  let moving: { layer: { x: number; y: number }; sx: number; sy: number; ox: number; oy: number } | null = null;
-  let resizing: { handle: Handle; layer: ImageLayer | FontLayer | ProseLayer | ReferenceLayer; before: unknown } | null = null;
   let framing: { x: number; y: number; cur: Pointer } | null = null;   // Type tool: dragging out a new prose frame
   let selecting = false;                                                 // Type tool: dragging over prose selects text
   // text tool state
@@ -279,15 +338,35 @@ export function createTools(ed: Editor): Tool[] {
   };
 
   return [
-    freehand("pencil", "Pencil", "b", "Draw the brush character. Right button erases. Alt-click picks up a cell.", false,
-      (s, x, y, p) => s.at(x, y, (lx, ly) => { if (p.button === 2) s.edit.clear(lx, ly); else s.edit.set(lx, ly, brushCell(ed)); })),
-    freehand("half", "Half block", "h", "Paint half-cell pixels: left button = foreground colour, right = background colour.", true,
-      (s, x, hy, p) => s.at(x, hy >> 1, (lx, ly) => paintHalf(ed, s, lx, ly, (hy & 1) === 1, p.button === 2 ? ed.bg : ed.fg))),
+    {
+      // the Brush, as in Moebius: one tool whose mode says what it paints (half block by default)
+      id: "brush", label: "Brush", key: "b",
+      get hint() {
+        return BRUSH_HINTS[ed.brushMode];
+      },
+      down(p) { stroke = Stroke.begin(ed); last = null; this.move(p); },
+      move(p) {
+        if (!stroke) return;
+        const half = ed.brushMode === "half";
+        // the first dab, then each segment without its start (already painted): shading must not step a cell twice
+        const pts = !last ? [[p.x, half ? p.hy : p.y] as [number, number]]
+          : (half ? lineCells(last.x, last.hy, p.x, p.hy) : lineCells(last.x, last.y, p.x, p.y)).slice(1);
+        const off = brushOffsets(ed);
+        for (const [x, y] of pts) for (const dy of off) for (const dx of off) paintBrush(ed, stroke, x + dx, y + dy, p);
+        stroke.flush();
+        last = p;
+      },
+      up() { stroke?.end(BRUSH_LABELS[ed.brushMode]); stroke = null; last = null; },
+      footprint(p) {
+        const off = brushOffsets(ed), half = ed.brushMode === "half", y = half ? p.hy : p.y;
+        return { cells: off.flatMap((dy) => off.map((dx): [number, number] => [p.x + dx, y + dy])), half };
+      },
+    },
     freehand("eraser", "Eraser", "e", "Make cells see-through again, so the layers below show.", false,
       (s, x, y) => s.at(x, y, (lx, ly) => s.edit.clear(lx, ly))),
-    shape("line", "Line", "l", "Drag a line of the brush character.", (a, b) => lineCells(a.x, a.y, b.x, b.y)),
-    shape("rect", "Rectangle", "r", "Drag a rectangle. Hold Shift to fill it.", rectCells),
-    shape("ellipse", "Ellipse", "o", "Drag an ellipse. Hold Shift to fill it.", (a, b) => ellipseCells(a.x, a.y, b.x, b.y, b.shift)),
+    shape("line", "line", "Line", "l", "Drag a line: the brush character, half-block pixels, or a box-drawing edge when it is straight."),
+    shape("rect", "rect", "Rectangle", "r", "Drag corner to corner. The outline can be the brush character, half blocks or CP437 box drawing; hold Shift to fill it."),
+    shape("ellipse", "ellipse", "Ellipse", "o", "Drag corner to corner: the ellipse fits the box you drag out. Hold Shift to fill it."),
     {
       id: "fill", label: "Fill", key: "f", hint: "Flood-fill connected identical cells on the active layer with the brush.",
       down(p) {
@@ -320,81 +399,19 @@ export function createTools(ed: Editor): Tool[] {
       down(p) { pickUp(ed, p.x, p.y); }, move(p) { if (p.button >= 0) pickUp(ed, p.x, p.y); }, up() {},
     },
     {
-      id: "move", label: "Move layer", key: "v", hint: "Drag the active layer. Content pushed off the canvas is kept.",
+      id: "move", label: "Move / transform", key: "v",
+      hint: "Free transform (Ctrl/Cmd+T): drag the handles to scale, inside to move. A cells layer scales its content — or just the selected cells; a live layer keeps its recipe.",
       down(p) {
         const l = ed.active;
         if (!l || l.type === "group") { ed.setStatus("Select a layer to move."); return; }
         if (l.locked) { ed.setStatus(`"${l.name}" is locked.`); return; }
-        const handle = handleAt(ed, p.x, p.y);
-        if (handle && l.type === "image") { resizing = { handle, layer: l, before: snapshotImage(l) }; return; }
-        if (handle && l.type === "font") { resizing = { handle, layer: l, before: l.wrapWidth }; return; }
-        if (handle && (l.type === "prose" || l.type === "reference")) { resizing = { handle, layer: l, before: { width: l.width, height: l.height } }; return; }
-        moving = { layer: l, sx: p.x, sy: p.y, ox: l.x, oy: l.y };
+        if (!l.visible) { ed.setStatus(`"${l.name}" is hidden.`); return; }
+        xf.begin(p, xf.hit(p) ?? "move");   // outside the handles' box, dragging still moves the layer
       },
-      move(p) {
-        if (resizing) {
-          const { handle, layer } = resizing;
-          const w = Math.max(1, p.x - layer.x + 1), hgt = Math.max(1, p.y - layer.y + 1);
-          if (layer.type === "image") {
-            // corner and right edge keep the image's aspect (rows follow); bottom edge sets rows only
-            if (handle === "bottom") layer.rows = hgt; else { layer.cols = w; layer.rows = 0; }
-            void scheduleImageRefresh(ed, layer);
-          } else if (layer.type === "prose") {
-            if (handle !== "bottom") layer.width = w;
-            if (handle !== "right") layer.height = hgt;
-            refreshProseLayer(ed.doc, layer, ed.glyphs);
-            ed.recomposite();
-          } else if (layer.type === "reference") {
-            // the corner keeps the image's aspect in cells (a cell is 8x16, so height = width / 2 * image ratio)
-            if (handle === "corner") { layer.width = w; layer.height = Math.max(1, Math.round(w * (layer.height / Math.max(1, (resizing.before as { width: number }).width)))); }
-            else if (handle === "right") layer.width = w; else layer.height = hgt;
-            ed.recomposite();
-          } else {
-            layer.wrapWidth = w;
-            refreshFontLayer(ed.doc, layer);
-            ed.recomposite();
-          }
-          ed.emit("ui");
-          return;
-        }
-        if (!moving) return;
-        moving.layer.x = moving.ox + p.x - moving.sx;
-        moving.layer.y = moving.oy + p.y - moving.sy;
-        ed.recomposite();
-        ed.emit("ui");
-      },
-      up() {
-        if (resizing) {
-          const { layer, before } = resizing;
-          resizing = null;
-          if (layer.type === "image") commitImage(ed, layer, "Resize image", before as ReturnType<typeof snapshotImage>, true);
-          else if (layer.type === "prose" || layer.type === "reference") {
-            const from = before as { width: number; height: number }, to = { width: layer.width, height: layer.height };
-            if (from.width !== to.width || from.height !== to.height) {
-              layer.width = from.width; layer.height = from.height;
-              if (layer.type === "prose") ed.setProps("Resize text frame", layer, to, () => { refreshProseLayer(ed.doc, layer, ed.glyphs); });
-              else ed.setProps("Resize reference", layer, to);
-            }
-          } else {
-            const from = before as number | undefined, to = layer.wrapWidth;
-            if (from !== to) {
-              layer.wrapWidth = from;
-              ed.setProps("Wrap width", layer, { wrapWidth: to }, () => { refreshFontLayer(ed.doc, layer); });
-            }
-          }
-          return;
-        }
-        if (!moving) return;
-        const { layer, ox, oy } = moving, nx = layer.x, ny = layer.y;
-        moving = null;
-        if (nx === ox && ny === oy) return;
-        layer.x = ox; layer.y = oy;
-        ed.setProps("Move layer", layer, { x: nx, y: ny });
-      },
-      cursor(p) {
-        const h = handleAt(ed, p.x, p.y);
-        return h === "corner" ? "nwse-resize" : h === "right" ? "ew-resize" : h === "bottom" ? "ns-resize" : "move";
-      },
+      move(p) { xf.drag(p); },
+      up(p) { xf.end(p); },
+      cursor: (p) => xf.cursor(xf.hit(p)) ?? "move",
+      handles: () => xf.handles(),
       // double-click a text layer to edit its text: select it, switch to Type, caret in the text field
       dblclick(p) {
         const g = ed.comp.grid;
@@ -583,6 +600,5 @@ export function pickUp(ed: Editor, x: number, y: number): void {
   const g = ed.comp.grid;
   if (!g.inBounds(x, y)) return;
   const c = g.get(x, y);
-  ed.glyph = c.glyph; ed.fg = c.fg; ed.bg = c.bg;
-  ed.emit("ui");
+  ed.setBrush({ glyph: c.glyph, fg: c.fg, bg: c.bg });
 }

@@ -504,11 +504,11 @@ await page.keyboard.press("b");
 await clickLayer("title (live text)");
 check("selecting a text layer with a brush active switches to Type, with its text on the left", await toolNow() === "text" && JSON.stringify(await leftPanels()) === '["font"]', `${await toolNow()} ${JSON.stringify(await leftPanels())}`);
 const dimmed = await kd(() => [...document.querySelectorAll(".palette .na")].map((b) => b.getAttribute("aria-label").split(" (")[0]));
-check("tools that can't act on a text layer are dimmed", JSON.stringify(dimmed) === JSON.stringify(["Pencil", "Half block", "Eraser", "Line", "Rectangle", "Ellipse", "Fill", "Pick up", "Find & replace"]), dimmed.join(", "));
+check("tools that can't act on a text layer are dimmed (the shape tools place a shape layer, so they can)", JSON.stringify(dimmed) === JSON.stringify(["Brush", "Eraser", "Fill", "Pick up", "Find & replace"]), dimmed.join(", "));
 await page.keyboard.press("h");
 check("choosing a dimmed tool is refused, with the reason", await toolNow() === "text" && (await kd(() => window.kd.ed.status)).includes("rasterize"), await kd(() => window.kd.ed.status));
 await clickLayer("backdrop");
-check("going back to a cells layer brings the brush back", await toolNow() === "pencil");
+check("going back to a cells layer brings the brush back", await toolNow() === "brush");
 await page.keyboard.press("v");
 await clickLayer("title (live text)");
 check("Move sticks when switching to a text layer", await toolNow() === "move");
@@ -643,6 +643,102 @@ check("ellipse tool draws an outline: hollow middle, touches the top, misses the
 await mod(["Shift"], () => drag([40, 4], [60, 12]));
 check("…and filled with Shift", (await cell(50, 8)).glyph === 219);
 
+// --- shape styles: box drawing, half blocks, fills; brush size
+await page.keyboard.press("r");
+await kd(() => { const e = window.kd.ed; e.glyph = 219; e.fg = 15; e.bg = 1; e.emit("ui"); });
+await clickButton("single line", ".toolbox"); await clickButton("colour", ".toolbox");
+await drag([10, 14], [20, 18]);
+const box1 = await kd(() => { const g = window.kd.ed.comp.grid; return { tl: g.get(10, 14).glyph, br: g.get(20, 18).glyph, top: g.get(15, 14).glyph, side: g.get(10, 16).glyph, inside: g.get(15, 16) }; });
+check("rectangle in single-line box drawing, with a colour fill inside", box1.tl === 218 && box1.br === 217 && box1.top === 196 && box1.side === 179 && box1.inside.glyph === 32 && box1.inside.bg === 1, JSON.stringify(box1));
+await clickButton("double line", ".toolbox"); await clickButton("hollow", ".toolbox");
+await drag([25, 14], [35, 18]);
+const box2 = await kd(() => { const g = window.kd.ed.comp.grid; return { tl: g.get(25, 14).glyph, top: g.get(30, 14).glyph, inside: g.get(30, 16) }; });
+check("…and double-line, hollow (the inside keeps its old background)", box2.tl === 201 && box2.top === 205 && box2.inside.bg !== 1 && box2.inside.glyph !== 205, JSON.stringify(box2));
+await clickButton("half block", ".toolbox");
+await drag([40, 29], [50, 35], { half: true });                       // lower half of row 14 down to lower half of row 17
+const box3 = await kd(() => { const g = window.kd.ed.comp.grid; return { top: g.get(45, 14), side: g.get(40, 16), inside: g.get(45, 16).glyph, below: g.get(45, 18).glyph }; });
+check("half-block rectangle paints half rows: the top edge is a lone lower half", box3.top.glyph === 220 && box3.top.fg === 15 && box3.side.glyph === 219 && box3.inside !== 219 && box3.inside !== 220 && box3.below !== 220, JSON.stringify(box3));
+await page.keyboard.press("l");
+await clickButton("single line", ".toolbox");
+await drag([55, 14], [70, 14]);
+await drag([55, 15], [70, 19]);
+const lines = await kd(() => { const g = window.kd.ed.comp.grid; return { straight: g.get(60, 14).glyph, diagonal: g.get(55, 15).glyph }; });
+check("a straight box-drawing line is ─; a diagonal falls back to the brush character", lines.straight === 196 && lines.diagonal === 219, JSON.stringify(lines));
+await page.keyboard.press("b");
+await page.keyboard.press("]"); await page.keyboard.press("]");
+check("] grows the brush and the panel shows it", await kd(() => window.kd.ed.brushSize === 3 && document.querySelector(".toolbox .stepper .value").textContent === "3"));
+await kd(() => { const e = window.kd.ed; e.fg = 14; e.bg = 0; e.emit("ui"); });
+await drag([60, 22], [60, 22]);
+const big = await kd(() => { const g = window.kd.ed.comp.grid; return { a: g.get(59, 21).glyph, b: g.get(61, 23).glyph, c: g.get(62, 22).glyph, d: g.get(60, 20).glyph }; });
+check("a size-3 pencil paints a 3×3 square around the click", big.a === 219 && big.b === 219 && big.c !== 219 && big.d !== 219, JSON.stringify(big));
+await page.keyboard.press("["); await page.keyboard.press("[");
+// --- the brush's other modes: shading steps the ramp, colorize keeps the characters
+check("B is the brush in character mode; H is the brush in half-block mode", await kd(() => window.kd.ed.tool === "brush" && window.kd.ed.brushMode === "char"));
+await clickButton("shading", ".toolbox");
+await kd(() => { const e = window.kd.ed; e.fg = 11; e.bg = 0; e.emit("ui"); });
+await drag([65, 20], [70, 20]); await drag([65, 20], [70, 20]); await drag([65, 20], [70, 20]);
+check("three shading strokes take empty cells to ▓ in the brush colours", await kd(() => { const c = window.kd.ed.comp.grid.get(67, 20); return c.glyph === 178 && c.fg === 11; }));
+await drag([65, 20], [70, 20], { button: "right" });
+check("…and the right button steps back down to ▒", await kd(() => window.kd.ed.comp.grid.get(67, 20).glyph === 177));
+await clickButton("colorize", ".toolbox");
+await kd(() => { const e = window.kd.ed; e.fg = 13; e.drawBg = false; e.emit("ui"); });
+await drag([65, 20], [70, 20]);
+check("colorize recolours the foreground and keeps the character", await kd(() => { const c = window.kd.ed.comp.grid.get(67, 20); return c.glyph === 177 && c.fg === 13; }));
+await kd(() => { const e = window.kd.ed; e.drawBg = true; e.brushMode = "char"; e.emit("ui"); });
+await page.keyboard.press("h");
+check("H: the hover footprint is a half cell", await kd(() => window.kd.ed.brushMode === "half" && window.kd.tools.find((t) => t.id === "brush").footprint({ x: 1, y: 1, hy: 3 }).half));
+await page.keyboard.press("b");
+await kd(() => { const e = window.kd.ed; e.shapeStyle = "char"; e.shapeFill = "none"; e.emit("ui"); });
+await shot("15b-shapes");
+
+// --- shape layers: Add layer → Shape, drag it, restyle from the left, reshape by its handles, then free transform of cells
+/** page coordinates of a point in document pixels (a handle knob) */
+const docXY = (px, py) => kd((px, py) => { const r = document.querySelector("canvas.overlay").getBoundingClientRect(), z = window.kd.ed.zoom; return { x: r.left + px * z, y: r.top + py * z }; }, px, py);
+const dragFromKnob = async (px, py, to) => { const a = await docXY(px, py), b = await cellXY(to[0], to[1]); await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 12 }); await page.mouse.up(); };
+await page.keyboard.press("r");
+await clickButton("double line", ".toolbox");
+const layersBefore = await kd(() => window.kd.ed.doc.layers.length);
+await addLayerVia("Shape");
+check("Add layer → Shape adds nothing yet: it arms the shape tools", await kd((n) => window.kd.ed.pendingShape && window.kd.ed.tool === "rect" && window.kd.ed.doc.layers.length === n, layersBefore));
+await drag([5, 14], [25, 20]);
+const shapeL = await kd(() => { const l = window.kd.ed.active; return { type: l.type, kind: l.kind, style: l.style, x: l.x, y: l.y, w: l.width, h: l.height, tl: window.kd.ed.comp.grid.get(5, 14).glyph, pending: window.kd.ed.pendingShape }; });
+check("…and the drag places a live rectangle layer of that box, in double lines", shapeL.type === "shape" && shapeL.kind === "rect" && shapeL.style === "double" && shapeL.x === 5 && shapeL.y === 14 && shapeL.w === 21 && shapeL.h === 7 && shapeL.tl === 201 && !shapeL.pending, JSON.stringify(shapeL));
+await clickButton("half block", ".toolbox");
+const asHalf = await kd(() => ({ style: window.kd.ed.active.style, top: window.kd.ed.comp.grid.get(15, 14).glyph }));
+check("the Shape panel on the left restyles the selected shape: half blocks", asHalf.style === "half" && asHalf.top === 223, JSON.stringify(asHalf));
+await page.keyboard.down("Meta"); await page.keyboard.press("z"); await page.keyboard.up("Meta");
+check("…undoably", await kd(() => window.kd.ed.active.style === "double" && window.kd.ed.comp.grid.get(5, 14).glyph === 201 && window.kd.ed.shapeStyle === "double"));
+await kd(() => document.querySelectorAll(".toolbox .swatch")[12].click());
+check("the brush swatches recolour the selected shape", await kd(() => window.kd.ed.active.fg === 12 && window.kd.ed.comp.grid.get(5, 14).fg === 12));
+await dragFromKnob(26 * 8, 21 * 16, [35, 22]);   // the bottom-right knob, with the rectangle tool still active
+const resized = await kd(() => { const l = window.kd.ed.active; return { type: l.type, w: l.width, h: l.height, br: window.kd.ed.comp.grid.get(35, 22).glyph, old: window.kd.ed.comp.grid.get(25, 20).glyph, n: window.kd.ed.doc.layers.length }; });
+check("dragging a corner handle with the shape tool reshapes it (no new layer)", resized.type === "shape" && resized.w === 31 && resized.h === 9 && resized.br === 188 && resized.old !== 188 && resized.n === layersBefore + 1, JSON.stringify(resized));
+await drag([10, 16], [20, 18]);   // inside the shape: moves it
+check("dragging inside the shape moves it", await kd(() => window.kd.ed.active.x === 15 && window.kd.ed.active.y === 16 && window.kd.ed.comp.grid.get(15, 16).glyph === 201));
+await page.keyboard.down("Meta"); await page.keyboard.press("z"); await page.keyboard.up("Meta");
+await drag([50, 14], [60, 18]);   // outside it: another shape layer
+check("dragging outside the shape places another shape layer", await kd((n) => window.kd.ed.doc.layers.length === n + 2 && window.kd.ed.active.x === 50, layersBefore));
+await kd(() => window.kd.ed.removeLayer(window.kd.ed.activeId));
+await clickButton("rasterize", ".layers");
+check("rasterize turns it into cells that keep the drawing", await kd(() => window.kd.ed.active.type === "cells" && window.kd.ed.comp.grid.get(35, 22).glyph === 188));
+// free transform of the cells: the handles frame the layer's content; a corner scales it nearest-neighbour
+await page.keyboard.down("Meta"); await page.keyboard.press("t"); await page.keyboard.up("Meta");
+check("Cmd+T is the Move / transform tool", await kd(() => window.kd.ed.tool === "move"));
+await dragFromKnob(36 * 8, 23 * 16, [46, 24]);
+const xfScaled = await kd(() => { const g = window.kd.ed.comp.grid; return { br: g.get(46, 24).glyph, tl: g.get(5, 14).glyph, old: g.get(35, 22).glyph }; });
+check("scaling a cells layer's content by a corner keeps the box's corners at the new corners", xfScaled.br === 188 && xfScaled.tl === 201 && xfScaled.old !== 188, JSON.stringify(xfScaled));
+await page.keyboard.down("Meta"); await page.keyboard.press("z"); await page.keyboard.up("Meta");
+check("…as one undo step", await kd(() => window.kd.ed.comp.grid.get(35, 22).glyph === 188 && window.kd.ed.comp.grid.get(46, 24).glyph !== 188));
+await page.keyboard.press("m");
+await drag([5, 14], [8, 15]);
+await page.keyboard.press("v");
+await drag([6, 14], [16, 24]);   // inside the selection: moves just those cells
+const movedSel = await kd(() => { const g = window.kd.ed.comp.grid, s = window.kd.ed.selection; return { to: g.get(15, 24).glyph, from: g.get(5, 14).glyph, kept: g.get(35, 22).glyph, sel: s && s.has(15, 24) && !s.has(5, 14) }; });
+check("with a selection, Move lifts and moves only the selected cells, and the selection follows", movedSel.to === 201 && movedSel.from !== 201 && movedSel.kept === 188 && movedSel.sel === true, JSON.stringify(movedSel));
+await page.keyboard.down("Meta"); await page.keyboard.press("d"); await page.keyboard.up("Meta");
+await kd(() => { const e = window.kd.ed; e.shapeStyle = "char"; e.emit("ui"); });
+await shot("15c-shape-layer");
+
 await page.keyboard.press("x");
 check("X turns on mirror mode", await kd(() => window.kd.ed.mirrorX && document.querySelector('[aria-label^="Mirror"]').classList.contains("active")));
 await page.keyboard.press("b");
@@ -657,6 +753,17 @@ await kd(() => { const [t, a, g] = document.querySelectorAll(".dialog input[type
 await clickButton("Save", ".dialog");
 const sauceNow = await kd(() => window.kd.ed.doc.sauce);
 check("the SAUCE editor sets title, author, group and comments, undoably", sauceNow.title === "My Piece" && sauceNow.author === "me" && sauceNow.comments.length === 2 && await kd(() => window.kd.ed.history.canUndo), JSON.stringify(sauceNow));
+
+// the 3D wiggle export previews and tunes the animation before saving
+await clickButton("Export", ".topbar");
+await clickButton("3D wiggle", ".menu");
+const wig = await kd(() => ({ canvas: !!document.querySelector(".dialog canvas.wiggle-preview"), info: document.querySelector(".dialog p.hint:last-of-type").textContent, w: document.querySelector(".dialog canvas").width }));
+check("the wiggle dialog opens with an animated preview and says what it will save", wig.canvas && wig.w === 640 && /24 frames of 640×400/.test(wig.info) || /at the glass/.test(wig.info), JSON.stringify(wig));
+await kd(() => { const s = [...document.querySelectorAll(".dialog .slider input")][1]; s.value = "8"; s.dispatchEvent(new Event("input")); const sel = [...document.querySelectorAll(".dialog select")][1]; sel.value = "2"; sel.dispatchEvent(new Event("change")); });
+const wig2 = await kd(() => ({ info: document.querySelector(".dialog p.hint:last-of-type").textContent, w: document.querySelector(".dialog canvas").width }));
+check("…and follows the frame count and size settings", wig2.w === 1280 && (/8 frames of 1280×800/.test(wig2.info) || /at the glass/.test(wig2.info)), JSON.stringify(wig2));
+await clickButton("Cancel", ".dialog");
+check("Cancel closes it without saving", await kd(() => !document.querySelector(".dialog")));
 const withSauce = await kd(async () => { const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts"); const { ed } = window.kd; return core.parseAnsi(core.encodeAnsi(ed.comp.grid, { iceColors: false, sauce: ed.doc.sauce })).sauce.title; });
 check("…and it goes out in the .ans", withSauce === "My Piece");
 
@@ -759,7 +866,7 @@ const wireSeqs = await kd(async () => { const core = await import("/@fs/Volumes/
 check("the export carries it as the `+ z` pop-out extension beside the `* z` depths", wireSeqs.some((w) => w.endsWith("40+z")) && wireSeqs.some((w) => w.includes("300*z")), JSON.stringify(wireSeqs));
 await shot("19-depth-slider");
 
-check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 14 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
+check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 13 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
 await shot("12-ui");
 
 // first launch: a fresh profile gets monke.jock with the preview wiggling; New puts it back to flat, and it never comes back
@@ -770,6 +877,29 @@ await first.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
 await first.waitForFunction(() => window.kd?.ed.fileName === "monke.jock", { timeout: 10000 }).catch(() => {});
 const welcome = await first.evaluate(() => ({ file: window.kd.ed.fileName, layers: window.kd.ed.doc.layers.length, mode: document.querySelector(".preview-bar select").value, dirty: window.kd.ed.dirty, status: document.querySelector(".status")?.textContent ?? "" }));
 check("the first launch opens monke.jock, clean, with the preview wiggling", welcome.file === "monke.jock" && welcome.layers === 7 && welcome.mode === "wiggle" && !welcome.dirty, JSON.stringify(welcome));
+
+// the 3D wiggle export, on a real piece with depth: an APNG an independent decoder (Pillow) reads, whose frames differ
+const apngB64 = await first.evaluate(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const { ed } = window.kd, plan = core.planDepth(ed.comp), N = 24, frames = [];
+  for (let k = 0; k < N; k++) {
+    const r = core.createRaster(ed.doc.width, ed.doc.height, ed.font, ed.doc.letterSpacing9px);
+    core.renderDepthView(ed.comp, plan, ed.font, r, Math.sin((2 * Math.PI * k) / N) * core.deviceShiftPx(1e9), { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px });
+    frames.push(r);
+  }
+  const bytes = core.encodeApng(frames, 68);
+  let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s);
+});
+const apngPath = join(out, "monke-wiggle.png");
+writeFileSync(apngPath, Buffer.from(apngB64, "base64"));
+let pil = null;
+try {
+  const { execFileSync } = await import("node:child_process");
+  const script = `import json\nfrom PIL import Image\nim = Image.open(${JSON.stringify(apngPath)})\nim.seek(0); a = im.convert('RGB').tobytes()\nim.seek(6); b = im.convert('RGB').tobytes()\nprint(json.dumps({'n': im.n_frames, 'animated': im.is_animated, 'size': im.size, 'differ': a != b, 'delay': im.info.get('duration')}))`;
+  pil = JSON.parse(execFileSync("python3", ["-c", script]).toString());
+} catch (err) { console.log(`(no Pillow oracle: ${err.message.split("\n")[0]})`); }
+if (pil) check("the wiggle APNG decodes in Pillow: 24 frames at 68 ms, and the eyes' views differ", pil.n === 24 && pil.animated && pil.differ && pil.delay === 68 && pil.size[0] === 8 * 80, JSON.stringify(pil));
 await first.evaluate(() => [...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") ?? "").startsWith("New document")).click());
 await first.waitForFunction(() => window.kd?.ed.fileName === "untitled", { timeout: 5000 }).catch(() => {});
 const afterNew = await first.evaluate(() => ({ file: window.kd.ed.fileName, mode: document.querySelector(".preview-bar select").value }));

@@ -54,7 +54,10 @@ runs; text layers and image layers say what is missing.
 - **Canvas**: add or remove rows and columns at any edge — adding at the top or left shifts every layer along; cropping loses nothing.
 - **3D (3dBBS)**: a per-layer depth slider — into the screen on the left, the glass at zero, popping out on the right — with a readout of how far apart the two eyes' copies land on the 3DS (past ~26 px the eyes stop fusing it, so the slider stops at 300 in / 60 out); a stereo mode in the preview (wiggle, follow the mouse, red/cyan, side by side) drawn with the device's own disparity formula, and `.ans` export with `CSI = … z` depth tags that other terminals ignore. Depths are the device's centi-world-units: under ~30 is barely visible, 100+ reads clearly, backdrops sit around 300 in. Pop-out goes out as `CSI = Ps ; Pd + z` (3dBBS protocol 0.4; a 0.3 client shows such layers at the glass).
 - **F-key character sets**: the TheDraw / PabloDraw / Moebius convention — 16 stock sets, F1–F10 type the set's glyphs at the typewriter caret (or into prose, or into the brush when nothing is being typed), F11/F12 or Ctrl+,/. change set. The set shows as a clickable bar in the footer while the Type tool is active. The Type tool is the **grid typewriter** first: click a cell and type; drag out a frame instead for reflowing prose.
-- **Drawing**: pencil (with per-channel switches: recolour only, or draw characters with no background), half-block brush, eraser, line, rectangle, ellipse (Shift fills), fill, pick-up, type; undo/redo for everything.
+- **Drawing**: one Brush with Moebius's modes — **half block** (the default, `H`: left button paints fg, right bg, two pixels per cell), **character** (`B`, with per-channel switches: recolour only, or draw characters with no background), **shading** (steps cells up ░ ▒ ▓ █, right button back down) and **colorize** (colours only) — plus eraser, line, rectangle, ellipse, fill, pick-up, type; undo/redo for everything. The brush and eraser have a size (`[` and `]`, or the field in the Brush panel): a 3 paints a 3×3 square of cells, or of half blocks.
+- **Shapes** are dragged corner to corner (the ellipse fits the box you drag, HERMedIT-style — not Moebius's centre-out drag). The Shape panel picks what the outline is made of — the brush character, half-block pixels (left button foreground, right background, at half-row resolution like the brush), or CP437 single/double box drawing with proper corners (a straight line becomes `─`/`│`; diagonals and ellipses keep the character) — and what goes inside: hollow, a flat colour (spaces in the brush colours), or the character. Shift while dragging fills a hollow shape. On a cells layer the shape is painted as cells. On any other layer — or after **Add layer → Shape**, which arms the shape tools — the drag places a **live shape layer** that keeps its line / box / ellipse: drag its handles to reshape it, inside it to move it, outside it to place another; the Shape and Brush panels on the left restyle and recolour the selected shape. Rasterize it (right) when you want cells.
+- **Free transform** (Move tool, `V` or Ctrl/Cmd+T): handles around the active layer — a corner or edge scales, inside moves. Live layers keep their recipe (a shape re-renders, a text frame rewraps, an image re-converts); a cells layer's content is lifted, scaled nearest-neighbour and put back, live, as one undo step — and with a selection, only the selected cells move or scale, and the selection follows.
+- **Joint — draw with Moebius users** (topbar "joint", Ctrl/Cmd+J): connects to a Moebius collaboration server (`host:8000/path`, nick, group, password) as a full peer. The server holds a flat canvas edited cell by cell; here, "open joint" makes it a document (its cells as the base layer, plus a pinned **joint: others** layer that receives everyone else's edits), and every local change — on any layer, live text, shapes, undo — goes out as the cells it changed in the flattened picture. Other people's cursors show with their nicks; a floating window has the users and chat; iCE, 9px, font, SAUCE and canvas size sync both ways. "Push my document" instead pushes your whole picture into the room. The wire is 16 colours, so 24-bit cells go out as their nearest palette entry. `scripts/joint-server/` holds a copy of the genuine Moebius server (Apache-2.0) for testing and for hosting (`node scripts/joint-server/start.mjs --file piece.ans --port 8000 --path name`); `npm run smoke:joint` and `npm run smoke:joint-app` test against it.
 - **Mirror mode** (X; Shift+X for top/bottom): every stroke is repeated across the canvas centre, with glyphs that have a mirror image swapped (▌↔▐, ┌↔┐, ( ↔ ) …).
 - **Reference images**: an image shown over the canvas to draw from, at any size and opacity — never part of the picture or the exports. One click converts it into a real image layer at the same place.
 - **Scale a drawn layer** two ways: *cells* stretches the grid (exact at 200%, 300%…) and keeps every character; *re-match* renders it to pixels, scales, and lets shadeans redraw it — its style, not your strokes. Flip horizontal/vertical too.
@@ -65,7 +68,10 @@ runs; text layers and image layers say what is missing.
 - **Files**: `.jock` project (ZIP: manifest, layer data, masks, original assets, flattened `preview.ans`). Projects saved as `.kdraw` by earlier builds still open.
   **Open** makes a new document from a file; **drop** a file on the window and it is added to the current document as a layer instead (art lands where you dropped it; a dropped `.jock` opens as the document).
   Open / import: ANS (16-colour, iCE, 24-bit), BIN, XBIN, TundraDraw `.tnd`, Synchronet Ctrl-A `.msg`, Artworx `.adf`, iCE Draw `.idf`, Avatar `.avt`, plain text.
-  Export: ANS, 3dBBS ANS, BIN, XBIN, TundraDraw, Ctrl-A, text (CP437 or UTF-8), PNG — the same set PabloDraw writes, plus 3dBBS.
+  Export: ANS, 3dBBS ANS, BIN, XBIN, TundraDraw, Ctrl-A, text (CP437 or UTF-8), PNG — the same set PabloDraw writes, plus 3dBBS —
+  and two pictures of the depth layers: a **3D wiggle** animated PNG (plays anywhere an APNG does — browsers, Discord,
+  Mastodon) and a red/cyan anaglyph PNG. The wiggle export opens a dialog that animates exactly what will be saved, with
+  the eye separation (100% = the 3DS at full slider, up to 200%), swing or two-frame flip, frame count, speed and 1–3× size.
 
 Not yet: moving/transforming a selection in place (paste-as-layer + Move covers it for now), mesh layers, Windows/Linux builds tried on real machines.
 
@@ -114,7 +120,7 @@ to arrange the window and so triggers a macOS "control Finder" permission prompt
   there, and switch it to a 3D mode to see the layer depths — then the layer stack, then the active layer's own
   properties in collapsible panels (depth, image settings, palette swap, mask, key rules). Panels remember whether you
   left them open.
-- **Top**: new, open, import as layer, save, export (a small menu: `.ans`, `.png`, 3dBBS `.ans`), undo/redo, zoom, canvas
+- **Top**: new, open, import as layer, save, export (a small menu: `.ans`, `.png`, 3dBBS `.ans`, 3D wiggle / anaglyph `.png`), undo/redo, zoom, canvas
   size and iCE.
 
 ## Checks
@@ -122,6 +128,8 @@ to arrange the window and so triggers a macOS "control Finder" permission prompt
 ```sh
 npm run check           # typecheck + unit tests (core)
 npm run smoke           # drives the running editor in headless Chrome with real mouse/keyboard input
+npm run smoke:joint     # the Moebius protocol against the genuine server (first: cd scripts/joint-server && npm install)
+npm run smoke:joint-app # two headless editors in one joint on that server: draws, undo, chat, cursors, resize, push
 ```
 
 `npm run smoke` needs `npm run dev` running and a Chrome binary (`CHROME_PATH`, or
@@ -134,7 +142,8 @@ packages/core           document model, compositor, matcher, undo, TDF, renderer
 packages/app            the editor (Vite, plain TypeScript)
 packages/shadeans-wasm  C-ABI wrapper that compiles shadeans' sources in by path
 packages/desktop        Tauri shell: window, native menu, file read/write, open-with, close guard
-scripts/                font sync, shadeans build, browser smoke test
+scripts/                font sync, shadeans build, browser smoke tests
+scripts/joint-server/   the Moebius collaboration server (Apache-2.0 copy, see its NOTICE.md): test rig, and `start.mjs` to host a joint
 ```
 
 ## Licence

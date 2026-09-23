@@ -15,6 +15,8 @@ const ICONS = {
   reference: '<rect x="3" y="5" width="18" height="14" stroke-dasharray="3 2.5"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 16l5-5 4.5 4.5 3-3L21 17" opacity=".6"/>',
   scale: '<rect x="4" y="9" width="11" height="11"/><path d="M15 9V4H4"/><path d="M20 4l-5 5M20 4h-4M20 4v4"/>',
   recent: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
+  // collaboration: two people at one canvas
+  joint: '<circle cx="8" cy="7.5" r="2.6"/><circle cx="17" cy="8.5" r="2.2"/><path d="M3.5 19c0-3.3 2-5 4.5-5s4.5 1.7 4.5 5"/><path d="M14 19c0-2.6 1.4-4 3-4s3 1.4 3 4"/>',
   // depth slider markers
   depthIn: '<path d="M12 4v10"/><path d="M8 10l4 4 4-4"/><path d="M5 19h14"/>',
   depthGlass: '<path d="M12 3v18"/><path d="M8 7l-3 5 3 5M16 7l3 5-3 5" opacity=".5"/>',
@@ -41,6 +43,7 @@ const ICONS = {
   text: '<path d="M5 19l7-15 7 15"/><path d="M8 13h8"/>',
   image: '<rect x="3" y="5" width="18" height="14"/><circle cx="8.5" cy="9.5" r="1.5"/><path d="M3 16l5-5 4.5 4.5 3-3L21 17"/>',
   prose: '<path d="M4 6h16M4 10h16M4 14h10M4 18h13"/>',
+  shape: '<rect x="3" y="4" width="10" height="8"/><ellipse cx="16" cy="16" rx="5" ry="4"/>',
   group: '<path d="M12 3l8 4-8 4-8-4z"/><path d="M4 12l8 4 8-4"/><path d="M4 16.5l8 4 8-4"/>',
   up: '<path d="M12 19V5"/><path d="M6 11l6-6 6 6"/>',
   down: '<path d="M12 5v14"/><path d="M6 13l6 6 6-6"/>',

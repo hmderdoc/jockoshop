@@ -1,0 +1,13 @@
+{
+  "name": "killerdraw-joint-server",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Vendored copy of the real Moebius collaboration server, for testing killerdraw's joint client against the genuine thing.",
+  "license": "Apache-2.0",
+  "//type": "killerdraw's root package.json says \"type\": \"module\"; this copy is CommonJS, so the nearest package.json has to say so.",
+  "type": "commonjs",
+  "dependencies": {
+    "upng-js": "2.1",
+    "ws": "8.15"
+  }
+}
