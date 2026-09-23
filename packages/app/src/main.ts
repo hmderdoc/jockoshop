@@ -4,6 +4,7 @@ import {
   renderGrid, saveProject,
 } from "@killerdraw/core";
 import fontUrl from "../../core/assets/ibmstd.f16?url";
+import welcomeUrl from "../assets/monke.jock?url";
 import { Editor } from "./editor.js";
 import { FontLibrary } from "./fonts.js";
 import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
@@ -108,7 +109,11 @@ async function start(): Promise<void> {
     ed.setStatus(`Saved ${ed.fileName}`);
     return true;
   };
-  const newDocument = async (): Promise<void> => { if (await confirmDiscard()) ed.setDocument(createDocument(80, 25), "untitled"); };
+  const newDocument = async (): Promise<void> => {
+    if (!await confirmDiscard()) return;
+    ed.setDocument(createDocument(80, 25), "untitled");
+    ed.emit("preview", "flat");   // the welcome piece's wiggle ends where your own work begins
+  };
 
   io.onOpenRequest((files, at) => {
     // a project replaces the document; art and images become layers — an image lands where it was dropped
@@ -356,8 +361,12 @@ async function start(): Promise<void> {
     if (tool) ed.chooseTool(tool.id);
   });
 
-  // ?demo builds a small layered document, so there is something to look at straight away
+  // ?demo builds a small layered document, so there is something to look at straight away;
+  // the very first launch instead opens a real 3D piece, wiggling, so depth is the first thing seen
+  let welcomed = true;
+  try { welcomed = localStorage.getItem(WELCOME_KEY) === "1"; localStorage.setItem(WELCOME_KEY, "1"); } catch { /* private mode: every launch is the first */ }
   if (new URLSearchParams(location.search).has("demo")) await loadDemo(ed, lib);
+  else if (!welcomed) await loadWelcome(ed);
   if (io.desktop) {
     await buildMenu({
       newDocument, open: openFile, importLayer, save: () => saveProjectFile(), saveAs: () => saveProjectFile(true),
@@ -377,6 +386,18 @@ async function start(): Promise<void> {
   if (import.meta.env.PROD && !io.desktop && "serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js").catch((err: unknown) => console.warn("service worker:", err));
   }
+}
+
+const WELCOME_KEY = "jockoshop.welcomed";
+
+/** The first launch opens monke.jock — six layers from 565 behind the glass to bananas popping out — with the preview wiggling. */
+async function loadWelcome(ed: Editor): Promise<void> {
+  try {
+    const bytes = new Uint8Array(await (await fetch(welcomeUrl)).arrayBuffer());
+    ed.setDocument(loadProject(bytes), "monke.jock");
+    ed.emit("preview", "wiggle");
+    ed.setStatus("Welcome. This is monke.jock, a layered 3D piece — the preview is wiggling to show its depth. File › New starts your own.");
+  } catch { /* no welcome piece, no problem: the blank document stands */ }
 }
 
 async function loadDemo(ed: Editor, lib: FontLibrary): Promise<void> {

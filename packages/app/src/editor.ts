@@ -25,7 +25,7 @@ const TOOL_NAMES: Record<ToolId, string> = {
   move: "Move", text: "Type", marquee: "Marquee", lasso: "Lasso", wand: "Magic wand", find: "Find & replace",
 };
 
-type EventName = "doc" | "pixels" | "ui" | "status" | "scroll";
+type EventName = "doc" | "pixels" | "ui" | "status" | "scroll" | "preview";   // preview: arg is the mode to switch the 3D preview to
 
 /** All editor state, plus the one place where the document changes and the view is told about it. */
 export class Editor {

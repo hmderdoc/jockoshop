@@ -121,6 +121,8 @@ function buildPreview(ed: Editor, view: CanvasView): HTMLElement {
   h("option", { value: "flat" }, "flat"), h("option", { value: "wiggle" }, "3D: wiggle"), h("option", { value: "mouse" }, "3D: follow mouse"),
   h("option", { value: "anaglyph" }, "3D: red / cyan"), h("option", { value: "sbs" }, "3D: side by side"));
   strengthIn.hidden = true;
+  // the app can switch the mode itself: the first launch wiggles the welcome piece, New goes back to flat
+  ed.on("preview", (m) => { mode = m as PreviewMode; modeSel.value = mode; strengthIn.hidden = mode === "flat"; refresh(); });
 
   ed.on("pixels", refresh);
   ed.on("doc", refresh);

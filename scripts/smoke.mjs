@@ -27,6 +27,8 @@ function findChrome() {
 const browser = await puppeteer.launch({ executablePath: findChrome(), args: ["--no-sandbox"] });
 const page = await browser.newPage();
 await page.setViewport({ width: 1680, height: 1000 });
+// this page is not a first launch: the welcome piece is checked on its own, in a fresh profile, at the end
+await page.evaluateOnNewDocument(() => { try { localStorage.setItem("jockoshop.welcomed", "1"); } catch { /* */ } });
 const problems = [];
 const dialogs = [];
 page.on("dialog", (d) => { dialogs.push(d.type()); void d.accept(); });
@@ -759,6 +761,22 @@ await shot("19-depth-slider");
 
 check("every tool is an icon with a hover tip", await kd(() => { const b = [...document.querySelectorAll(".palette button")]; return b.length === 14 && b.every((x) => x.querySelector("svg") && x.title.length > 10 && !x.textContent.trim()); }));
 await shot("12-ui");
+
+// first launch: a fresh profile gets monke.jock with the preview wiggling; New puts it back to flat, and it never comes back
+const firstProfile = await browser.createBrowserContext();
+const first = await firstProfile.newPage();
+first.on("pageerror", (e) => problems.push(`pageerror (first launch): ${e.message}`));
+await first.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await first.waitForFunction(() => window.kd?.ed.fileName === "monke.jock", { timeout: 10000 }).catch(() => {});
+const welcome = await first.evaluate(() => ({ file: window.kd.ed.fileName, layers: window.kd.ed.doc.layers.length, mode: document.querySelector(".preview-bar select").value, dirty: window.kd.ed.dirty, status: document.querySelector(".status")?.textContent ?? "" }));
+check("the first launch opens monke.jock, clean, with the preview wiggling", welcome.file === "monke.jock" && welcome.layers === 7 && welcome.mode === "wiggle" && !welcome.dirty, JSON.stringify(welcome));
+await first.evaluate(() => [...document.querySelectorAll("button")].find((b) => (b.getAttribute("aria-label") ?? "").startsWith("New document")).click());
+await first.waitForFunction(() => window.kd?.ed.fileName === "untitled", { timeout: 5000 }).catch(() => {});
+const afterNew = await first.evaluate(() => ({ file: window.kd.ed.fileName, mode: document.querySelector(".preview-bar select").value }));
+check("New starts a blank document and puts the preview back to flat", afterNew.file === "untitled" && afterNew.mode === "flat", JSON.stringify(afterNew));
+await first.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+check("the welcome piece is for the first launch only", await first.evaluate(() => window.kd?.ed.fileName) === "untitled");
+await firstProfile.close();
 
 check("no console errors or page errors", problems.length === 0, problems.slice(0, 3).join(" ; "));
 
