@@ -24,7 +24,7 @@ conversion settings) and `.ans` is an export. See [DESIGN.md](DESIGN.md).
 ```sh
 nvm use                 # Node 20 (.nvmrc)
 npm install
-npm run fonts           # copies TheDraw fonts from a Synchronet install (ctrl/tdfonts) — optional
+npm run fonts           # TheDraw fonts: a local Synchronet if you have one, else fetched — optional
 npm run shadeans        # builds the image converter to WebAssembly — optional, needs Rust + wasm32 target
 npm run dev             # http://127.0.0.1:5183   (add ?demo for a small synthetic layered document)
 ```
@@ -32,9 +32,12 @@ npm run dev             # http://127.0.0.1:5183   (add ?demo for a small synthet
 The first launch opens **monke.jock**, a six-layer 3D piece, with the preview wiggling so the depth is the
 first thing you see; File › New puts the preview back to flat and starts your own document.
 
-`npm run fonts -- /path/to/tdfonts` and `npm run shadeans -- /path/to/shadeans`
-point the two optional steps at other locations. Without them the editor still
-runs; text layers and image layers say what is missing.
+The 1,071 TheDraw fonts ship with Synchronet rather than this repo. `npm run fonts` uses a Synchronet install if it
+finds one, and otherwise fetches just `ctrl/tdfonts` from
+[Synchronet's repo](https://github.com/SynchronetBBS/sbbs) (a blobless sparse clone — a few seconds, cached under
+`node_modules/`). Point it at your own copy with `npm run fonts -- /path/to/ctrl/tdfonts`; same for
+`npm run shadeans -- /path/to/shadeans`. Without either step the editor still runs — text layers and image layers say
+what is missing.
 
 ## What works
 
