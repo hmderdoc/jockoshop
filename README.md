@@ -98,7 +98,19 @@ npm run desktop          # runs the app in a native window (first build compiles
 npm run desktop:build    # packages/desktop/src-tauri/target/release/bundle/macos/jockoshop.app (+ .dmg)
 ```
 
-Needs Rust (already required for shadeans). The desktop app is the same web app in a system webview, plus what a
+**Rust must be current stable, installed with [rustup](https://rustup.rs)** — `rustup update stable`, then
+`rustc --version`. Tauri's dependency tree tracks recent compilers, so an older toolchain stops the build with a wall of
+`<crate> requires rustc 1.88` lines. A distro package (`apt install rustc`) is usually too old and does not update;
+if `which rustc` says `/usr/bin/rustc`, install rustup instead and open a new shell. CI builds with whatever stable is.
+
+Build **natively for the platform you want**: a Windows app from PowerShell, not from WSL — WSL builds a Linux binary,
+needs Tauri's Linux packages (`libwebkit2gtk-4.1-dev`, `build-essential`, `curl`, `wget`, `file`, `libxdo-dev`,
+`libssl-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`) and a display for `tauri dev`, and compiling on a
+`/mnt/c` or `/mnt/d` path is very slow. `npm run desktop:build` is the
+macOS packaging step (`.app` + `.dmg`); elsewhere use `npx tauri build` inside `packages/desktop`, which writes the
+installer for the host platform, or let the release workflow build all three.
+
+The desktop app is the same web app in a system webview, plus what a
 browser can't do: files with paths (Save saves in place, Shift-click / Cmd+Shift+S for Save As), a native menu bar,
 `.jock` / `.ans` file associations, drag a file onto the window to add it as a layer (a `.jock` opens), files on the command line,
 and an "unsaved changes" prompt on close. Fonts and `shadeans.wasm` are compiled into the binary, so run
