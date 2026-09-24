@@ -103,12 +103,25 @@ npm run desktop:build    # packages/desktop/src-tauri/target/release/bundle/maco
 `<crate> requires rustc 1.88` lines. A distro package (`apt install rustc`) is usually too old and does not update;
 if `which rustc` says `/usr/bin/rustc`, install rustup instead and open a new shell. CI builds with whatever stable is.
 
-Build **natively for the platform you want**: a Windows app from PowerShell, not from WSL — WSL builds a Linux binary,
-needs Tauri's Linux packages (`libwebkit2gtk-4.1-dev`, `build-essential`, `curl`, `wget`, `file`, `libxdo-dev`,
-`libssl-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`) and a display for `tauri dev`, and compiling on a
-`/mnt/c` or `/mnt/d` path is very slow. `npm run desktop:build` is the
-macOS packaging step (`.app` + `.dmg`); elsewhere use `npx tauri build` inside `packages/desktop`, which writes the
-installer for the host platform, or let the release workflow build all three.
+On **Debian / Ubuntu** the Rust crates link against GTK and WebKit, so those development packages have to be there
+first — without them the build stops at `Package gdk-3.0 was not found in the pkg-config search path`. The same set CI
+installs:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-dev librsvg2-dev patchelf libxdo-dev libssl-dev \
+                 libayatana-appindicator3-dev build-essential pkg-config
+```
+
+Debian 11 and Ubuntu 22.04 and older carry only webkit2gtk **4.0**, which Tauri 2 cannot use — those need a newer release.
+
+Build **natively for the platform you want**: a Windows `.exe` from PowerShell, not from WSL. WSL produces a *Linux*
+binary, `tauri dev` there needs a display (WSLg), and compiling on a `/mnt/c` or `/mnt/d` path is several times slower
+than from the WSL filesystem. `npm run desktop:build` is the macOS packaging step (`.app` + `.dmg`); elsewhere run
+`npx tauri build` inside `packages/desktop`, which writes the installer for the host platform, or let the release
+workflow build all three.
+
+**`npm run doctor`** checks all of this — Node, Rust and its version, the wasm target, the GTK/WebKit libraries — and
+prints the exact command for whatever is missing, before a long compile finds out for you.
 
 The desktop app is the same web app in a system webview, plus what a
 browser can't do: files with paths (Save saves in place, Shift-click / Cmd+Shift+S for Save As), a native menu bar,
@@ -138,6 +151,7 @@ to arrange the window and so triggers a macOS "control Finder" permission prompt
 ## Checks
 
 ```sh
+npm run doctor          # what is installed and what each part of the build still needs
 npm run check           # typecheck + unit tests (core)
 npm run smoke           # drives the running editor in headless Chrome with real mouse/keyboard input
 npm run smoke:joint     # the Moebius protocol against the genuine server (first: cd scripts/joint-server && npm install)

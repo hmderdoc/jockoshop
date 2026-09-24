@@ -13,6 +13,7 @@
     "check": "npm run typecheck && npm run test",
     "fonts": "npm run build -w @killerdraw/core && node scripts/sync-fonts.mjs",
     "shadeans": "node scripts/build-shadeans.mjs",
+    "doctor": "node scripts/doctor.mjs",
     "smoke": "node scripts/smoke.mjs",
     "smoke:joint": "node scripts/smoke-joint.mjs",
     "smoke:joint-app": "node scripts/smoke-joint-app.mjs",
