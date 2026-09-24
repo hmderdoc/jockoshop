@@ -2,11 +2,12 @@
 // Run a real Moebius collaboration server (the vendored copy in ./app) so you can join it from
 // killerdraw AND from an installed Moebius.app at the same time.
 //
-//   node scripts/joint-server/start.mjs --file piece.ans --port 8000 --path name --pass x
+//   node scripts/joint-server/start.mjs --file piece.ans --port 8000 --pass x
 //
 //   --file <path>    the .ans/.bin/.xb to serve; created empty if it is not there (default ./joint.ans)
 //   --port <n>       default 8000 (Moebius.app assumes 8000 when you leave the port off)
-//   --path <name>    joint name; default is the file's basename, always lower-cased
+//   --path <name>    serve at host:port/name instead of the root — as upstream's --path; default none,
+//                    so clients connect with just host:port, like a stock Moebius server
 //   --pass <text>    default "" = no password
 //   --columns <n>    size used only when the file has to be created (default 80)
 //   --rows <n>       (default 25)
@@ -18,7 +19,7 @@ import { networkInterfaces } from "node:os";
 import { startJointServer } from "./rig.mjs";
 
 const argv = process.argv.slice(2);
-const opts = { file: "./joint.ans", port: 8000, path: undefined, pass: "", quiet: false, columns: 80, rows: 25, host: "0.0.0.0" };
+const opts = { file: "./joint.ans", port: 8000, path: "", pass: "", quiet: false, columns: 80, rows: 25, host: "0.0.0.0" };   // path "": the root, as upstream's CLI default
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i];
   if (arg === "--quiet") { opts.quiet = true; continue; }
@@ -34,12 +35,12 @@ for (let i = 0; i < argv.length; i++) {
 }
 
 const joint = await startJointServer(opts);
-const name = joint.path.slice(1);
+const suffix = joint.path === "/" ? "" : joint.path;
 const lan = Object.values(networkInterfaces()).flat().filter((i) => i && i.family === "IPv4" && !i.internal).map((i) => i.address);
 console.log(`serving ${joint.file}`);
 console.log(`  websocket   ${joint.url}`);
-console.log(`  Moebius.app File > Connect to Server…   localhost:${joint.port}/${name}`);
-for (const ip of lan) console.log(`              from another machine:        ${ip}:${joint.port}/${name}`);
+console.log(`  Moebius.app File > Connect to Server…   localhost:${joint.port}${suffix}`);
+for (const ip of lan) console.log(`              from another machine:        ${ip}:${joint.port}${suffix}`);
 if (opts.pass) console.log(`  password    ${opts.pass}`);
 console.log("Ctrl-C to stop (the file is saved on the way out)");
 

@@ -70,12 +70,30 @@ export interface JointView {
  * Moebius users type a server and a path ("ansi.example.org:8000/piece.ans"),
  * not a URL. Anything without a scheme gets ws://; http(s) becomes ws(s).
  */
-export function normalizeJointUrl(text: string): string {
+/** Is this page served over https? Then the browser only allows wss:// sockets. */
+export function pageIsSecure(): boolean {
+  return typeof location !== "undefined" && location.protocol === "https:";
+}
+
+/** `host:8000/name` as a socket URL: plain ws:// as Moebius speaks it, or wss:// where the page itself is https. */
+export function normalizeJointUrl(text: string, secure = pageIsSecure()): string {
   const t = text.trim().replace(/\s+/g, "");
   if (!t) return "";
   if (/^wss?:\/\//i.test(t)) return t;
   if (/^https?:\/\//i.test(t)) return t.replace(/^http/i, "ws");
-  return `ws://${t}`;
+  return `${secure ? "wss" : "ws"}://${t}`;
+}
+
+/**
+ * Why an address cannot work before a socket is even tried: the browser's own
+ * error for this one is buried in the console. A stock Moebius server lives at
+ * the root (`host:8000`); `--path=name` puts it at `host:8000/name`.
+ */
+export function jointAddressProblem(url: string, secure = pageIsSecure()): string | null {
+  if (secure && /^ws:\/\//i.test(url)) {
+    return "This page is served over https, so the browser refuses a plain ws:// connection. Put the Moebius server behind a TLS proxy and connect to wss://… (the desktop app can use ws:// directly).";
+  }
+  return null;
 }
 
 /** The joint's path, as the server keys it: lower-cased, always with a leading "/". */
@@ -210,6 +228,8 @@ export class JointClient {
     this.disconnect("Left for another joint.");   // one joint at a time; the old Remote layer stays as a layer
     const url = normalizeJointUrl(opts.url);
     if (!url) return Promise.reject(new Error("no server address"));
+    const problem = jointAddressProblem(url);
+    if (problem) return Promise.reject(new Error(problem));
     this.url = url;
     this.path = jointPathOf(url);
     this.nick = opts.nick.trim() || "anon";
@@ -248,7 +268,12 @@ export class JointClient {
         try { this.join(msg.data, opts.mode ?? "open"); } catch (err) { ws.close(); settle(err as Error); return; }
         settle();
       };
-      ws.onerror = () => { if (!opened) settle(new Error(`could not connect to ${url} — no server there, or no such joint on it`)); };
+      ws.onerror = () => {
+        if (opened) return;
+        settle(new Error(/^wss:/i.test(url)
+          ? `could not connect to ${url} — no server there, no such joint on it, or nothing speaking TLS on that port (the Moebius server itself only speaks ws://; wss:// needs a proxy in front of it)`
+          : `could not connect to ${url} — no server there, or no such joint on it`));
+      };
       ws.onclose = () => {
         if (!done) settle(new Error(opened ? "the server closed the connection" : `could not connect to ${url} — no server there, or no such joint on it`));
         else if (this.myId >= 0) this.dropped("The joint closed the connection.");

@@ -6,7 +6,7 @@
 import type { JointStatus } from "@killerdraw/core";
 import { modal } from "./dialogs.js";
 import type { Editor } from "./editor.js";
-import { JOINT_STATUS_NAMES, type JointClient, cursorColor, normalizeJointUrl } from "./joint.js";
+import { JOINT_STATUS_NAMES, type JointClient, cursorColor, normalizeJointUrl, pageIsSecure } from "./joint.js";
 import { field, h } from "./ui.js";
 
 const PREFS_KEY = "jockoshop.joint";
@@ -36,7 +36,7 @@ function savePrefs(patch: Partial<Prefs>): void {
 /** Connect to a joint. `onJoined` is called once the server has answered. */
 export function jointDialog(client: JointClient, onJoined: () => void): void {
   const prefs = loadPrefs();
-  const url = h("input", { type: "text", value: prefs.url, placeholder: "server:8000/piece.ans", style: "width:100%", spellcheck: false });
+  const url = h("input", { type: "text", value: prefs.url, placeholder: pageIsSecure() ? "wss://server/piece.ans (https page: the server needs a TLS proxy)" : "server:8000/piece.ans", style: "width:100%", spellcheck: false });
   const nick = h("input", { type: "text", value: prefs.nick, maxLength: 32, style: "width:160px" });
   const group = h("input", { type: "text", value: prefs.group, maxLength: 32, style: "width:160px" });
   const pass = h("input", { type: "password", value: "", style: "width:160px" });
