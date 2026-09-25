@@ -79,7 +79,13 @@ export function setBrushSize(ed: Editor, n: number): void {
   ed.emit("ui");
 }
 
-export function brushPanel(ed: Editor): Panel {
+/**
+ * `primary` = this tool draws with the brush, so the panel starts open. Under a
+ * tool that only borrows it (a selection's fill, Move) it starts collapsed but
+ * stays reachable — and remembers being opened there separately, so expanding it
+ * next to the Move tool does not follow you back to the pencil.
+ */
+export function brushPanel(ed: Editor, primary = true): Panel {
   const body = h("div");
   const blinks = (bg: number): boolean => !ed.doc.iceColors && bg >= 8 && bg < 16;
   const update = (): void => {
@@ -129,7 +135,7 @@ export function brushPanel(ed: Editor): Panel {
     ].filter((n): n is HTMLDivElement => !!n));
   };
   update();
-  return { el: panel("brush", "Brush", true, "The character and colours the drawing tools use. Alt-click the canvas to pick up a cell.", body), update };
+  return { el: panel(primary ? "brush" : "brush.aside", "Brush", primary, "The character and colours the drawing tools use — and what Fill, Delete and the typewriter take. Alt-click the canvas to pick up a cell.", body), update };
 }
 
 /** Line, Rectangle, Ellipse: what the outline is made of, and what goes inside. */
@@ -165,7 +171,7 @@ export function shapePanel(ed: Editor, tool: Tool): Panel {
   return { el: panel("shape", tool.label, true, tool.hint, body), update };
 }
 
-export function characterPanel(ed: Editor): Panel {
+export function characterPanel(ed: Editor, primary = true): Panel {
   const picker = h("canvas.glyph-picker", { width: 16 * 8, height: 16 * 16 });
   const all = new CellGrid(16, 16);
   for (let i = 0; i < 256; i++) all.setAt(i, { glyph: i, fg: 15, bg: 0 });
@@ -184,7 +190,7 @@ export function characterPanel(ed: Editor): Panel {
     ctx.strokeRect((ed.glyph % 16) * 8 + 0.5, Math.floor(ed.glyph / 16) * 16 + 0.5, 7, 15);
   };
   update();
-  return { el: panel("character", "Character", true, "All 256 CP437 characters. F1–F10 pick from the active F-key set (F11/F12 change set; the set shows in the footer while typing).", picker), update };
+  return { el: panel(primary ? "character" : "character.aside", "Character", primary, "All 256 CP437 characters. F1–F10 pick from the active F-key set (F11/F12 change set; the set shows in the footer while typing).", picker), update };
 }
 
 // ------------------------------------------------------------------ left: selecting

@@ -495,14 +495,30 @@ const forFind = await leftPanels();
 await kd(() => { const e = window.kd.ed; e.activeId = e.doc.layers[2].id; e.emit("doc"); });
 await page.keyboard.press("t");
 const forType = await leftPanels();
-check("left sidebar follows the tool", JSON.stringify([forDraw, forWand, forFind, forType]) === JSON.stringify([["brush", "character"], ["selectTool", "selection"], ["find"], ["font"]]), JSON.stringify([forDraw, forWand, forFind, forType]));
+check("left sidebar follows the tool", JSON.stringify([forDraw, forWand, forFind, forType]) === JSON.stringify([
+  ["brush", "character"], ["selectTool", "selection", "brush.aside", "character.aside"],
+  ["find", "brush.aside", "character.aside"], ["font", "brush.aside", "character.aside"],
+]), JSON.stringify([forDraw, forWand, forFind, forType]));
+// …and the brush is never taken away, only folded up: a selection's fill draws with it
+const openness = await kd(() => [...document.querySelectorAll(".toolbox details.sec")].map((d) => `${d.dataset.panel}:${d.open ? "open" : "shut"}`));
+check("under a tool that only borrows the brush it is collapsed, not gone", JSON.stringify(openness) === JSON.stringify(["font:open", "brush.aside:shut", "character.aside:shut"]), JSON.stringify(openness));
+await kd(() => { const e = window.kd.ed; e.activeId = e.doc.layers[0].id; e.emit("doc"); });
+await page.keyboard.press("w");
+await kd(() => document.querySelector('.toolbox details[data-panel="brush.aside"] > summary').click());
+const swatchesReachable = await kd(() => !!document.querySelector('.toolbox details[data-panel="brush.aside"] .swatch'));
+check("…and opening it there gives the swatches the wand's fill will use", swatchesReachable);
+await kd(() => { const s = document.querySelectorAll('.toolbox details[data-panel="brush.aside"] .swatch')[9]; s.click(); });
+check("…which set the brush like anywhere else", await kd(() => window.kd.ed.fg === 9));
+await page.keyboard.press("b");
+const backToDraw = await kd(() => { const d = document.querySelector('.toolbox details[data-panel="brush"]'); return d && d.open; });
+check("expanding it beside the wand does not follow you back to the brush tool", backToDraw === true);
 // the tool follows the layer
 const clickLayer = (name) => kd((name) => [...document.querySelectorAll(".layer")].find((r) => r.querySelector(".name").textContent === name).click(), name);
 const toolNow = () => kd(() => window.kd.ed.tool);
 await clickLayer("backdrop");
 await page.keyboard.press("b");
 await clickLayer("title (live text)");
-check("selecting a text layer with a brush active switches to Type, with its text on the left", await toolNow() === "text" && JSON.stringify(await leftPanels()) === '["font"]', `${await toolNow()} ${JSON.stringify(await leftPanels())}`);
+check("selecting a text layer with a brush active switches to Type, with its text on the left", await toolNow() === "text" && (await leftPanels())[0] === "font", `${await toolNow()} ${JSON.stringify(await leftPanels())}`);
 const dimmed = await kd(() => [...document.querySelectorAll(".palette .na")].map((b) => b.getAttribute("aria-label").split(" (")[0]));
 check("tools that can't act on a text layer are dimmed (the shape tools place a shape layer, so they can)", JSON.stringify(dimmed) === JSON.stringify(["Brush", "Eraser", "Fill", "Pick up", "Find & replace"]), dimmed.join(", "));
 await page.keyboard.press("h");

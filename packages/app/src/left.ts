@@ -30,16 +30,25 @@ export function buildLeft(ed: Editor, tools: Tool[], lib: FontLibrary): HTMLElem
 
   const note = (text: string): Panel => ({ el: h("p.hint.note", {}, text) });
 
+  /**
+   * The brush and its characters, under every tool. They used to be dropped
+   * entirely for the selection tools, Move and Find — but a selection's Fill and
+   * Delete draw with the brush, so setting the colour meant picking a tool you
+   * did not want, setting it, and coming back. Collapsed is enough.
+   */
+  const aside = (primary: boolean): Panel[] => [brushPanel(ed, primary), characterPanel(ed, primary)];
+
   const build = (): Panel[] => {
     const tool = tools.find((t) => t.id === ed.tool)!, layer = ed.active;
     const content = layer && layer.type !== "group" ? layer : null;
-    if (tool.selects) return [selectOptionsPanel(ed, tool), selectionPanel(ed)];
-    if (tool.id === "move") return content ? [positionPanel(ed, content)] : [note("Select a layer to move.")];
+    if (tool.selects) return [selectOptionsPanel(ed, tool), selectionPanel(ed), ...aside(false)];
+    if (tool.id === "move") return [...(content ? [positionPanel(ed, content)] : [note("Select a layer to move.")]), ...aside(false)];
     if (tool.id === "find") {
-      return content?.type === "cells" ? [findPanel(ed, content)] : [note("Find & replace works on cells layers. Select one, or rasterize this layer.")];
+      return [content?.type === "cells" ? findPanel(ed, content) : note("Find & replace works on cells layers. Select one, or rasterize this layer."), ...aside(false)];
     }
-    if (tool.id === "text" && content?.type === "font") return [fontPanel(ed, lib, content)];
-    if (tool.id === "text" && content?.type === "prose") return [prosePanel(ed, content), brushPanel(ed)];
+    // a live text layer takes its colours from the font panel, so the brush is only there if you go looking
+    if (tool.id === "text" && content?.type === "font") return [fontPanel(ed, lib, content), ...aside(false)];
+    if (tool.id === "text" && content?.type === "prose") return [prosePanel(ed, content), ...aside(true)];
     const out: Panel[] = [];
     if (content && content.type !== "cells") {
       out.push(note(content.type === "font"
@@ -50,7 +59,7 @@ export function buildLeft(ed: Editor, tools: Tool[], lib: FontLibrary): HTMLElem
         : "This is a live image layer. Adjust it on the right; rasterize it to draw on it."));
     }
     if (tool.id === "line" || tool.id === "rect" || tool.id === "ellipse") out.push(shapePanel(ed, tool));
-    return [...out, brushPanel(ed), characterPanel(ed)];
+    return [...out, ...aside(true)];
   };
 
   const render = (force: boolean): void => {
