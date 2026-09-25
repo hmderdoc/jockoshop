@@ -11,7 +11,7 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
-import { sauceDialog, wiggleDialog } from "./dialogs.js";
+import { confirmUnsaved, sauceDialog, wiggleDialog } from "./dialogs.js";
 import { JointClient } from "./joint.js";
 import { jointDialog, jointPanel } from "./jointui.js";
 import { buildLeft } from "./left.js";
@@ -88,14 +88,18 @@ async function start(): Promise<void> {
     } catch (err) { ed.setStatus(`Could not open ${file.name}: ${(err as Error).message}`); }
   };
 
-  const confirmDiscard = async (): Promise<boolean> => {
+  /** About to lose the document: save first, go ahead, or don't. `what` finishes "before …". */
+  const confirmDiscard = async (what: string): Promise<boolean> => {
     // in a joint, a replaced document is pushed into the room: everyone's canvas becomes this one
     if (joint.connected && !confirm(`You are in joint ${joint.path}. The document you open or create here is pushed into the room, replacing its canvas for everyone. Continue?`)) return false;
-    return !ed.dirty || confirm(`“${ed.fileName}” has unsaved changes. Discard them?`);
+    if (!ed.dirty) return true;
+    const choice = await confirmUnsaved(ed.fileName, what);
+    if (choice !== "save") return choice === "discard";
+    return saveProjectFile();   // a cancelled Save As means the whole thing is off
   };
 
   const openFile = async (): Promise<void> => {
-    if (!(await confirmDiscard())) return;
+    if (!(await confirmDiscard("opening another file"))) return;
     const file = await io.open([...PROJECT_EXTENSIONS, ...ART]);
     if (file) openPicked(file);
   };
@@ -124,7 +128,7 @@ async function start(): Promise<void> {
     return true;
   };
   const newDocument = async (): Promise<void> => {
-    if (!await confirmDiscard()) return;
+    if (!await confirmDiscard("starting a new document")) return;
     ed.setDocument(createDocument(80, 25), "untitled");
     ed.emit("preview", "flat");   // the welcome piece's wiggle ends where your own work begins
   };
@@ -134,7 +138,7 @@ async function start(): Promise<void> {
     const [first] = files;
     if (!first) return;
     void (async () => {
-      if (isProject(first.name)) { if (await confirmDiscard()) openPicked(first); return; }
+      if (isProject(first.name)) { if (await confirmDiscard(`opening “${first.name}”`)) openPicked(first); return; }
       const cell = at ? view.cellAt(at.x, at.y) ?? undefined : undefined;
       for (const f of files) {
         if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name)) { await importImage(ed, f.name, f.bytes, cell); continue; }
@@ -150,8 +154,8 @@ async function start(): Promise<void> {
   });
   io.onCloseRequest(async () => {
     if (!ed.dirty) return true;
-    const save = confirm(`Save changes to “${ed.fileName}” before closing?\n\nCancel keeps the window open; OK saves (or asks where to).`);
-    if (!save) return confirm("Close without saving?");
+    const choice = await confirmUnsaved(ed.fileName, "closing");
+    if (choice !== "save") return choice === "discard";
     return saveProjectFile();
   });
 
@@ -252,7 +256,7 @@ async function start(): Promise<void> {
   const recentMenu = h("div.menu", { hidden: true });
   const renderRecent = (): void => {
     const list = recents();
-    recentMenu.replaceChildren(...(list.length ? list.map((p) => h("button", { title: p, onclick: async () => { if (await confirmDiscard()) { try { openPicked(await io.readPath(p)); } catch (err) { ed.setStatus(`Could not open ${p}: ${(err as Error).message}`); } } } }, p.replace(/^.*[\\/]/, ""), h("span.muted", {}, p.replace(/[\\/][^\\/]*$/, "").slice(-28)))) : [h("span.muted", { style: "padding:4px 8px" }, "nothing yet")]),
+    recentMenu.replaceChildren(...(list.length ? list.map((p) => h("button", { title: p, onclick: async () => { if (await confirmDiscard(`opening “${p.replace(/^.*[\\/]/, "")}”`)) { try { openPicked(await io.readPath(p)); } catch (err) { ed.setStatus(`Could not open ${p}: ${(err as Error).message}`); } } } }, p.replace(/^.*[\\/]/, ""), h("span.muted", {}, p.replace(/[\\/][^\\/]*$/, "").slice(-28)))) : [h("span.muted", { style: "padding:4px 8px" }, "nothing yet")]),
       h("button", { onclick: () => { try { localStorage.removeItem(RECENT_KEY); } catch { /* */ } renderRecent(); } }, "clear"));
   };
   renderRecent();

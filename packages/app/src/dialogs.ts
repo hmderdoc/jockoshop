@@ -15,6 +15,44 @@ export function modal(title: string, body: HTMLElement[], buttons: HTMLElement[]
   return backdrop;
 }
 
+export type UnsavedChoice = "save" | "discard" | "cancel";
+
+/**
+ * Unsaved changes are about to be thrown away. Three answers, not the browser's
+ * two: save first, go ahead anyway, or don't do it at all. `what` finishes
+ * "before …" — "closing", "opening another file".
+ */
+export function confirmUnsaved(fileName: string, what: string): Promise<UnsavedChoice> {
+  return new Promise((resolve) => {
+    let done = false;
+    const settle = (choice: UnsavedChoice): void => {
+      if (done) return;
+      done = true;
+      window.removeEventListener("keydown", onKey, true);
+      backdrop.remove();
+      resolve(choice);
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); settle("cancel"); }
+      else if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); settle("save"); }
+    };
+    const button = (label: string, title: string, choice: UnsavedChoice, primary = false): HTMLElement =>
+      h(primary ? "button.primary" : "button", { title, onclick: () => settle(choice) }, label);
+    const backdrop = modal("Unsaved changes", [
+      h("p", {}, `“${fileName}” has changes that are not saved.`),
+      h("p.hint", {}, `Save them before ${what}, or go ahead and lose them.`),
+    ], [
+      button("Cancel", `Don't do it — stay in “${fileName}”`, "cancel"),
+      button("Proceed anyway", "Throw the changes away and continue", "discard"),
+      button("Save now", "Save the project first, then continue (Enter)", "save", true),
+    ], 460);
+    // a click on the backdrop dismisses it, which is the same as Cancel
+    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) settle("cancel"); });
+    window.addEventListener("keydown", onKey, true);
+    backdrop.querySelector<HTMLButtonElement>("button.primary")?.focus();
+  });
+}
+
 /** SAUCE: the metadata record at the end of .ans / .bin / .xb files. */
 export function sauceDialog(ed: Editor): void {
   const s = ed.doc.sauce;

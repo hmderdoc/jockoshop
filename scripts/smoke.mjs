@@ -846,6 +846,42 @@ await page.waitForFunction((n) => window.kd.ed.doc.layers.length > n, { timeout:
 check("Enter picks the font and adds the text layer", await kd(() => { const l = window.kd.ed.active; return l.type === "font" && l.runs[0].font.toLowerCase().includes("cyb"); }));
 await page.keyboard.press("Escape");
 
+// --- unsaved changes: save now / proceed anyway / cancel
+await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed);
+await kd(() => { const e = window.kd.ed; e.glyph = 65; e.fg = 15; e.bg = 0; e.emit("ui"); });
+await page.keyboard.press("b");
+await drag([3, 3], [9, 3]);
+check("the document is dirty after drawing", await kd(() => window.kd.ed.dirty));
+const openNew = async () => { await page.keyboard.down("Meta"); await page.keyboard.press("n"); await page.keyboard.up("Meta"); await page.waitForSelector(".dialog", { timeout: 5000 }); };
+await openNew();
+const asked = await kd(() => ({ title: document.querySelector(".dialog h3").textContent, buttons: [...document.querySelectorAll(".dialog button")].map((b) => b.textContent) }));
+check("New with unsaved changes asks, with three ways out", asked.title === "Unsaved changes" && JSON.stringify(asked.buttons) === JSON.stringify(["Cancel", "Proceed anyway", "Save now"]), JSON.stringify(asked));
+await clickButton("Cancel", ".dialog");
+check("Cancel keeps the document and its changes", await kd(() => !document.querySelector(".dialog") && window.kd.ed.dirty && window.kd.ed.comp.grid.get(5, 3).glyph === 65));
+await openNew();
+await page.keyboard.press("Escape");
+check("Escape is Cancel too", await kd(() => !document.querySelector(".dialog") && window.kd.ed.comp.grid.get(5, 3).glyph === 65));
+await openNew();
+await clickButton("Proceed anyway", ".dialog");
+await page.waitForFunction(() => window.kd.ed.fileName === "untitled" && !window.kd.ed.dirty, { timeout: 5000 });
+check("Proceed anyway throws the changes away and starts the new document", await kd(() => window.kd.ed.comp.grid.get(5, 3).glyph !== 65 && !document.querySelector(".dialog")));
+await drag([3, 3], [9, 3]);
+// the real Save As opens an OS picker that headless Chrome never answers, so only the write is stubbed
+await kd(() => { window.__saved = 0; window.kd.io.saveAs = async () => { window.__saved++; return "stubbed.jock"; }; });
+await openNew();
+await clickButton("Save now", ".dialog");
+await page.waitForFunction(() => window.kd.ed.fileName === "untitled" && !window.kd.ed.dirty && !document.querySelector(".dialog"), { timeout: 8000 });
+check("Save now saves first, then does what was asked", await kd(() => window.__saved === 1 && window.kd.ed.comp.grid.get(5, 3).glyph !== 65));
+
+// a save the user backs out of stops the whole thing: the document is still there
+await drag([3, 3], [9, 3]);
+await kd(() => { window.kd.io.saveAs = async () => null; });   // null = the picker was cancelled
+await openNew();
+await clickButton("Save now", ".dialog");
+await new Promise((r) => setTimeout(r, 300));
+check("backing out of the save keeps the document and its changes", await kd(() => window.kd.ed.dirty && window.kd.ed.comp.grid.get(5, 3).glyph === 65 && !document.querySelector(".dialog")));
+
 // depth slider: left = into the screen, middle = glass, right = out; the preview follows live
 await page.goto("http://127.0.0.1:5183/?demo", { waitUntil: "networkidle0" });
 await page.waitForFunction(() => window.kd?.ed.fileName === "demo");
