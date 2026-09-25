@@ -1,6 +1,6 @@
 import {
-  type CellGrid, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES, addImageAsset, createImageLayer,
-  gridFromShadeans, shadeansOptionBlock,
+  type CellGrid, type GlyphInfo, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES, addImageAsset,
+  applyMatte, borderColor, createImageLayer, gridFromShadeans, shadeansOptionBlock,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 
@@ -42,10 +42,14 @@ export async function imageSize(doc: KdDocument, source: string): Promise<{ widt
   return { width: bmp.width, height: bmp.height };
 }
 
-/** RGBA pixels -> cells through shadeans. `coverage` (0-255 per cell) leaves cells under transparent pixels absent. */
+/**
+ * RGBA pixels -> cells through shadeans. `coverage` (0-255 per cell, or per
+ * half-cell when it holds twice as many) leaves cells under transparent pixels
+ * absent, or reduces them to a half block.
+ */
 export async function convertPixels(
   rgba: Uint8ClampedArray, width: number, height: number, cols: number, rows: number,
-  options: ImageLayer["options"], iceColors: boolean, coverage?: Uint8Array,
+  options: ImageLayer["options"], iceColors: boolean, coverage?: Uint8Array, glyphs?: GlyphInfo,
 ): Promise<CellGrid> {
   const x = await shadeans();
   const pix = x.kd_alloc(rgba.length), opt = x.kd_alloc(13 * 4);
@@ -55,7 +59,7 @@ export async function convertPixels(
     new Float32Array(x.memory.buffer, opt, 13).set(shadeansOptionBlock(options, iceColors));
     out = x.kd_convert(pix, width, height, cols, rows, opt);
     const cells = new Uint8Array(x.memory.buffer, out, cols * rows * SHADEANS_CELL_BYTES);
-    return gridFromShadeans(cells, cols, rows, coverage);
+    return gridFromShadeans(cells, cols, rows, coverage, 128, glyphs);
   } finally {
     if (out) x.kd_free(out, cols * rows * SHADEANS_CELL_BYTES);
     x.kd_free(pix, rgba.length);
@@ -69,7 +73,7 @@ export async function rowsForAspect(width: number, height: number, cols: number)
 }
 
 /** Regenerate an image layer's cells from its source image and settings. */
-export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer): Promise<void> {
+export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, glyphs?: GlyphInfo): Promise<void> {
   const bytes = doc.assets.get(layer.source);
   if (!bytes) throw new Error(`image asset not in document: ${layer.source}`);
   const bmp = await bitmapOf(bytes);
@@ -80,20 +84,30 @@ export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer): Pro
   const canvas = new OffscreenCanvas(crop.width, crop.height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
   ctx.drawImage(bmp, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
-  const rgba = ctx.getImageData(0, 0, crop.width, crop.height).data;
+  const image = ctx.getImageData(0, 0, crop.width, crop.height);
+  const rgba = image.data;
 
-  // mean alpha under each cell, so transparent parts of the image become see-through cells
-  let coverage: Uint8Array | undefined;
   let translucent = false;
-  for (let i = 3; i < rgba.length; i += 4 * 97) if (rgba[i] < 255) { translucent = true; break; }
-  if (translucent) {
-    const small = new OffscreenCanvas(cols, rows), sctx = small.getContext("2d")!;
-    sctx.imageSmoothingQuality = "high";
-    sctx.drawImage(canvas, 0, 0, cols, rows);
-    const a = sctx.getImageData(0, 0, cols, rows).data;
-    coverage = Uint8Array.from({ length: cols * rows }, (_, i) => a[i * 4 + 3]);
+  if (layer.matte) {
+    // cut the background out in pixels, before the matcher can blend it into a
+    // cell; the bleed reaches about one cell, so nothing of it survives at the edge
+    const bleed = Math.min(48, Math.ceil(1.5 * Math.max(crop.width / cols, crop.height / rows)));
+    translucent = applyMatte(rgba, crop.width, crop.height, layer.matte, bleed) > 0;
+    if (translucent) ctx.putImageData(image, 0, 0);
   }
-  layer.cache = await convertPixels(rgba, crop.width, crop.height, cols, rows, layer.options, doc.iceColors, coverage);
+  if (!translucent) for (let i = 3; i < rgba.length; i += 4 * 97) if (rgba[i] < 255) { translucent = true; break; }
+
+  // mean alpha under each half of each cell, so transparent parts of the image
+  // become see-through cells — or half blocks where the subject ends mid-cell
+  let coverage: Uint8Array | undefined;
+  if (translucent) {
+    const small = new OffscreenCanvas(cols, rows * 2), sctx = small.getContext("2d")!;
+    sctx.imageSmoothingQuality = "high";
+    sctx.drawImage(canvas, 0, 0, cols, rows * 2);
+    const a = sctx.getImageData(0, 0, cols, rows * 2).data;
+    coverage = Uint8Array.from({ length: cols * rows * 2 }, (_, i) => a[i * 4 + 3]);
+  }
+  layer.cache = await convertPixels(rgba, crop.width, crop.height, cols, rows, layer.options, doc.iceColors, coverage, glyphs);
 }
 
 const jobs = new WeakMap<ImageLayer, { again: boolean }>();
@@ -104,7 +118,7 @@ const jobs = new WeakMap<ImageLayer, { again: boolean }>();
  * dragged slider never queues up work.
  */
 export async function scheduleImageRefresh(
-  ed: { doc: KdDocument; recomposite(): void; setStatus(s: string): void }, layer: ImageLayer,
+  ed: { doc: KdDocument; glyphs?: GlyphInfo; recomposite(): void; setStatus(s: string): void }, layer: ImageLayer,
 ): Promise<void> {
   const job = jobs.get(layer);
   if (job) { job.again = true; return; }
@@ -114,7 +128,7 @@ export async function scheduleImageRefresh(
     while (mine.again) {
       mine.again = false;
       const t0 = performance.now();
-      await refreshImageLayer(ed.doc, layer);
+      await refreshImageLayer(ed.doc, layer, ed.glyphs);
       ed.recomposite();
       ed.setStatus(`shadeans: ${layer.cache!.width}×${layer.cache!.height} cells in ${Math.round(performance.now() - t0)} ms`);
     }
@@ -130,20 +144,33 @@ export async function importImage(ed: Editor, name: string, bytes: Uint8Array, a
   const layer = createImageLayer(name.replace(/\.[^.]+$/, ""), addImageAsset(ed.doc, name, bytes), ed.doc.width);
   if (at) { layer.x = at.x; layer.y = at.y; }
   try {
-    await refreshImageLayer(ed.doc, layer);
+    await refreshImageLayer(ed.doc, layer, ed.glyphs);
     ed.addLayer(layer, "Add image layer");
   } catch (err) { ed.setStatus(`Could not add ${name}: ${(err as Error).message}`); }
 }
 
+/**
+ * The colour the source image's border is mostly made of — what a background
+ * cut-out keys on unless another colour is chosen.
+ */
+export async function sampleBorderColor(doc: KdDocument, layer: ImageLayer): Promise<number> {
+  const bmp = await bitmapOf(doc.assets.get(layer.source)!);
+  const crop = layer.crop ?? { x: 0, y: 0, width: bmp.width, height: bmp.height };
+  const canvas = new OffscreenCanvas(crop.width, crop.height);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.drawImage(bmp, crop.x, crop.y, crop.width, crop.height, 0, 0, crop.width, crop.height);
+  return borderColor(ctx.getImageData(0, 0, crop.width, crop.height).data, crop.width, crop.height);
+}
+
 /** The part of an image layer that a size or look change touches: one undo step covers it. */
-export type ImageRecipe = Pick<ImageLayer, "cols" | "rows" | "crop" | "options">;
+export type ImageRecipe = Pick<ImageLayer, "cols" | "rows" | "crop" | "options" | "matte">;
 export function snapshotImage(layer: ImageLayer): ImageRecipe {
-  return { cols: layer.cols, rows: layer.rows, crop: layer.crop && { ...layer.crop }, options: { ...layer.options } };
+  return { cols: layer.cols, rows: layer.rows, crop: layer.crop && { ...layer.crop }, options: { ...layer.options }, matte: layer.matte && { ...layer.matte } };
 }
 /** Record a finished change as one undo step; the layer already holds the new state. */
 export function commitImage(ed: Editor, layer: ImageLayer, label: string, before: ImageRecipe, structural = false): void {
   const after = snapshotImage(layer);
-  const restore = (r: ImageRecipe): void => { Object.assign(layer, { cols: r.cols, rows: r.rows, crop: r.crop && { ...r.crop }, options: { ...r.options } }); void scheduleImageRefresh(ed, layer).then(() => ed.emit("doc")); };
+  const restore = (r: ImageRecipe): void => { Object.assign(layer, { cols: r.cols, rows: r.rows, crop: r.crop && { ...r.crop }, options: { ...r.options }, matte: r.matte && { ...r.matte } }); void scheduleImageRefresh(ed, layer).then(() => ed.emit("doc")); };
   ed.history.push({ label, redo: () => restore(after), undo: () => restore(before) });
   ed.emit(structural ? "doc" : "ui");
 }

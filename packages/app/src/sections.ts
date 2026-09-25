@@ -5,7 +5,7 @@
  */
 import {
   type CellMatch, CellGrid, type CellsLayer, type ContentLayer, type FontLayer, type ImageLayer, type KeyRule, type ProseLayer,
-  SHADEANS_DEFAULTS, type SelectMode, Selection, type ShadeansOptions, type ShapeLayer, addFontAsset, cellPatchCommand, createRaster,
+  MATTE_DEFAULTS, SHADEANS_DEFAULTS, type SelectMode, Selection, type ShadeansOptions, type ShapeLayer, addFontAsset, cellPatchCommand, createRaster,
   emptyIsTransparentRule, findCells, fontsOfAsset, identityRemap, isIdentityRemap, randomRemap, refreshFontLayer,
   refreshProseLayer, refreshShapeLayer, remapPresets, renderGrid, replaceCells,
 } from "@killerdraw/core";
@@ -13,10 +13,10 @@ import { type BrushMode, type Editor, MAX_BRUSH_SIZE, type ShapeFill, type Shape
 import { type FontLibrary, pickFont } from "./fonts.js";
 import { iconButton } from "./icons.js";
 import {
-  copySelection, cutSelection, deleteSelection, fillSelection, maskLayerFromSelection, paste, selectAll,
-  selectFromMask, selectInverse, selectLayerContent, selectNone,
+  copySelection, cutSelection, deleteSelection, despeckleLayer, fillSelection, maskLayerFromSelection, paste,
+  selectAll, selectFromMask, selectInverse, selectLayerContent, selectNone,
 } from "./selectionops.js";
-import { type ImageRecipe, commitImage, imageSize, scheduleImageRefresh, snapshotImage } from "./shadeans.js";
+import { type ImageRecipe, commitImage, imageSize, sampleBorderColor, scheduleImageRefresh, snapshotImage } from "./shadeans.js";
 import type { Tool } from "./tools.js";
 import { colorName, colorSelect, cssColor, field, glyphLabel, h, numberInput, parseGlyph } from "./ui.js";
 
@@ -233,9 +233,14 @@ export function selectionPanel(ed: Editor): Panel {
         b("layer", "Select every cell the active layer has something in", () => selectLayerContent(ed))),
       h("div.grid4", {},
         b("fill", "Fill with the brush, through the char / fg / bg switches", () => fillSelection(ed), n > 0),
-        b("delete", "Make the selection see-through on this layer (Delete). With some of char / fg / bg off, only the others are removed", () => deleteSelection(ed), n > 0),
+        b("delete", "Make the selection see-through on this layer (Delete). With some of char / fg / bg off, only the others are removed. On a live layer — an image, TheDraw text — it becomes a hole in the layer's mask instead, so nothing is destroyed and there is no need to rasterize first", () => deleteSelection(ed), n > 0),
         b("copy", "Ctrl/Cmd+C — with Shift, the flattened picture", () => void copySelection(ed), n > 0),
         b("cut", "Ctrl/Cmd+X", () => cutSelection(ed), n > 0)),
+      h("div.row.wrap", {},
+        check("clean edges", ed.cleanEdges,
+          "After a delete, take the colour you removed out of the cells around the selection too. Those straddled the edge, so one character and two colours cannot drop only their half of it — without this they stay behind as a halo.",
+          () => { ed.cleanEdges = !ed.cleanEdges; ed.emit("ui"); }),
+        b("despeckle", "Drop cells left on their own, with nothing beside them — the specks a cut-out scatters around a subject", () => despeckleLayer(ed))),
       h("div.grid4", {}, b("paste", "Paste as a new layer (Ctrl/Cmd+V)", () => paste(ed), !!ed.clipboard)),
       h("div.replace-with", { title: "A mask hides part of the layer without erasing it; manage it under the layer's Mask panel" }, "mask the layer"),
       h("div.grid2", {},
@@ -566,6 +571,35 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
   const flag = (label: string, key: "truecolor" | "blocks" | "autoLevels", title: string): HTMLElement =>
     check(label, layer.options[key], title, () => change(label, () => { layer.options[key] = !layer.options[key]; }));
 
+  // Cutting the background out happens in the source pixels, before shadeans
+  // matches them: a cell that straddles the silhouette would otherwise come
+  // back as one character blending subject and background, which nothing
+  // afterwards can separate.
+  const matte = layer.matte;
+  const hex = (c: number): string => `#${c.toString(16).padStart(6, "0")}`;
+  const setMatte = (label: string, patch: Partial<NonNullable<ImageLayer["matte"]>>): void =>
+    change(label, () => { layer.matte = { ...MATTE_DEFAULTS, ...layer.matte, ...patch }; });
+  const matteSlider = (label: string, key: "tolerance" | "grow", min: number, max: number, title: string): HTMLElement => {
+    let from: Recipe | null = null;
+    const readout = h("span.muted", {}, String(matte![key]));
+    const input = h("input", {
+      type: "range", min, max, step: 1, value: String(matte![key]), title,
+      oninput: () => {
+        from ??= snapshot();
+        layer.matte = { ...layer.matte!, [key]: Number(input.value) };
+        readout.textContent = input.value;
+        void scheduleImageRefresh(ed, layer);
+      },
+      onchange: () => { if (from) { commit(`Background ${label}`, from); from = null; } },
+    });
+    return h("label.slider", { title }, h("span", {}, label), input, readout);
+  };
+  const cutOut = async (): Promise<void> => {
+    if (layer.matte) { change("Keep background", () => { layer.matte = undefined; }); return; }
+    const color = await sampleBorderColor(ed.doc, layer);   // the border is the background often enough to be the default
+    setMatte("Cut out background", { color });
+  };
+
   const tc = layer.options.truecolor, crop = layer.crop;
   let size: { width: number; height: number } | null = null;
   void imageSize(ed.doc, layer.source).then((sz) => { size = sz; });
@@ -597,6 +631,22 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
       slider("local contrast", "localContrast", 0, 1, 0.05, tc ? 0 : 0.5, "Pushes shapes away from their surroundings in lightness"),
       slider("equalize", "equalize", 0, 1, 0.05, 0, "Spreads bunched-up tones apart; try 0.4 on dim, murky pictures"),
       slider("smooth", "smooth", 0, 4, 1, 0, "Edge-preserving smoothing passes on the source"),
+      h("div.row.wrap", {},
+        check("cut out background", !!matte,
+          "Make the background see-through before the picture is matched, so no cell ends up half background. Keys on the colour beside it — the source's border to begin with.",
+          () => void cutOut()),
+        matte && h("input", {
+          type: "color", value: hex(matte.color ?? 0), title: "The colour being cut away",
+          onchange: (e: Event) => setMatte("Background colour", { color: Number.parseInt((e.target as HTMLInputElement).value.slice(1), 16) }),
+        }),
+        matte && h("button", { title: "Take the colour from the source's border again", onclick: () => void sampleBorderColor(ed.doc, layer).then((color) => setMatte("Background colour", { color })) }, "resample")),
+      matte && matteSlider("tolerance", "tolerance", 0, 100, "How far from that colour still counts as background. Raise it for a photographed or JPEG backdrop, lower it when the subject starts disappearing"),
+      matte && matteSlider("grow", "grow", -8, 8, "Eat further into the subject (+) or leave more of the background (-), in source pixels. A small + trims a rim of leftover background"),
+      matte && h("div.row", {},
+        check("only from the edges", matte.edges,
+          "Cut only the background joined to the border, so the same colour inside the subject — sky through a window, a blue eye — is kept. Off: every matching pixel goes.",
+          () => setMatte("Background reach", { edges: !matte.edges })),
+        h("span.muted", {}, "a hole in the subject needs this off")),
       h("div.row", { title: "Part of the source image to convert, in its own pixels" },
         cropField("crop x", "x", 0, "0", 0), cropField("y", "y", 0, "0", 0),
         cropField("w", "width", 1, "full", 1e9), cropField("h", "height", 1, "full", 1e9)),

@@ -1,6 +1,6 @@
 import {
-  CH_BG, CH_FG, CH_GLYPH, CellGrid, type ContentLayer, Selection, createCellsLayer, maskFromSelection,
-  layerGrid, selectionFromMask,
+  CH_ALL, CH_BG, CH_FG, CH_GLYPH, CellGrid, type ContentLayer, type MatchContext, Selection, createCellsLayer,
+  defringe, despeckle, dominantColor, maskFromSelection, layerGrid, selectionFromMask,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 import { Stroke, layerInDocSpace } from "./tools.js";
@@ -8,8 +8,10 @@ import { Stroke, layerInDocSpace } from "./tools.js";
 /** The channels the Char / FG / BG switches currently cover (all three off means all three). */
 function activeChannels(ed: Editor): number {
   const c = (ed.drawGlyph ? CH_GLYPH : 0) | (ed.drawFg ? CH_FG : 0) | (ed.drawBg ? CH_BG : 0);
-  return c || CH_GLYPH | CH_FG | CH_BG;
+  return c || CH_ALL;
 }
+
+const matchContext = (ed: Editor): MatchContext => ({ palette: ed.doc.palette, glyphs: ed.glyphs });
 
 function eachSelected(sel: Selection, fn: (x: number, y: number) => void): void {
   for (let i = 0; i < sel.mask.length; i++) if (sel.mask[i]) fn(i % sel.width, Math.floor(i / sel.width));
@@ -56,16 +58,86 @@ export function fillSelection(ed: Editor): void {
  * Remove the selected cells from the active layer so what is below shows. With
  * some of Char / FG / BG switched off, only the others are removed — e.g. BG
  * alone strips backgrounds and leaves the characters.
+ *
+ * On a live layer there are no cells to erase, so the selection becomes a hole
+ * in the layer's mask instead: the image or the text is untouched and the hole
+ * can be taken back from the Mask panel. That is what makes wand-then-Delete
+ * work on an image without rasterizing it first.
  */
 export function deleteSelection(ed: Editor): void {
   const sel = needSelection(ed);
   if (!sel) return;
+  const layer = ed.active;
+  if (layer && layer.type !== "group" && layer.type !== "cells") { hideSelection(ed, layer, sel); return; }
   const s = Stroke.begin(ed);
   if (!s) return;
   const channels = activeChannels(ed);
+  const whole = channels === CH_ALL;
+  // the colour to clean away is whatever the selection was made of — read it
+  // before the delete takes it away
+  const key = ed.cleanEdges && whole
+    ? dominantColor(s.edit.grid, matchContext(ed), (lx, ly) => sel.has(lx + s.layer.x, ly + s.layer.y))
+    : -1;
   eachSelected(sel, (x, y) => s.at(x, y, (lx, ly) => s.edit.clear(lx, ly, channels)));
+  const tidied = key >= 0 ? cleanAround(ed, s, sel, key) : 0;
   s.end("Delete selection");
-  ed.setStatus(channels === 7 ? `Removed ${sel.count()} cells.` : "Removed the switched-on channels from the selection.");
+  ed.setStatus(!whole ? "Removed the switched-on channels from the selection."
+    : tidied ? `Removed ${sel.count()} cells and cleaned ${tidied} more along the edge.`
+    : `Removed ${sel.count()} cells.`);
+}
+
+/** Cut the selection out of a live layer's mask, keeping any hole already there. */
+function hideSelection(ed: Editor, layer: ContentLayer, sel: Selection): void {
+  const g = layerGrid(layer);
+  const next = maskFromSelection(layer, g?.width ?? 0, g?.height ?? 0, sel, true);
+  const old = layer.mask;
+  if (old?.enabled) {   // a mask already hides part of it: keep both holes
+    for (let y = 0; y < next.height; y++) {
+      for (let x = 0; x < next.width; x++) {
+        if (x < old.width && y < old.height && !old.data[y * old.width + x]) next.data[y * next.width + x] = 0;
+      }
+    }
+  }
+  ed.setProps("Hide selection", layer, { mask: next });
+  ed.setStatus(`Hid ${sel.count()} cells behind a mask — “${layer.name}” is untouched. The Mask panel on the right takes it back.`);
+}
+
+/**
+ * Take the deleted colour out of the cells just outside the selection. Those
+ * are the ones that straddled the silhouette, so they still hold some of the
+ * background — the halo left behind by a plain delete.
+ */
+function cleanAround(ed: Editor, s: Stroke, sel: Selection, key: number): number {
+  const { x: ox, y: oy } = s.layer;
+  const ring = (lx: number, ly: number): boolean => {
+    const x = lx + ox, y = ly + oy;
+    if (sel.has(x, y)) return false;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) if (sel.has(x + dx, y + dy)) return true;
+    return false;
+  };
+  const touched: [number, number][] = [];
+  const n = defringe(s.edit, key, matchContext(ed), (lx, ly) => {
+    if (!ring(lx, ly)) return false;
+    touched.push([lx + ox, ly + oy]);
+    return true;
+  });
+  for (const [x, y] of touched) s.touch(x, y);
+  return n;
+}
+
+/**
+ * Drop cells left stranded on their own — the specks a matte or a delete
+ * scatters around a subject. Confined to the selection when there is one.
+ */
+export function despeckleLayer(ed: Editor): void {
+  const s = Stroke.begin(ed);
+  if (!s) return;
+  const sel = ed.selection;
+  const inside = sel ? (lx: number, ly: number): boolean => sel.has(lx + s.layer.x, ly + s.layer.y) : undefined;
+  const n = despeckle(s.edit, 1, inside);
+  for (let y = 0; y < s.layer.grid.height; y++) for (let x = 0; x < s.layer.grid.width; x++) s.touch(x + s.layer.x, y + s.layer.y);
+  s.end("Despeckle");
+  ed.setStatus(n ? `Dropped ${n} stray cells.` : "No stray cells to drop.");
 }
 
 /** Copy the selection from the active layer (any kind), or from the flattened picture with `merged`. */

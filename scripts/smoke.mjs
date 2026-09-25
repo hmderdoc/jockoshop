@@ -243,6 +243,8 @@ const discCache = await activeCache();
 check("image layer: transparent pixels become see-through cells", discCache.absent > 0 && discCache.absent < discCache.w * discCache.h, `${discCache.absent} of ${discCache.w * discCache.h} cells absent (${d.w}x${d.h})`);
 await shot("09-image-alpha");
 
+// what a saved and reloaded project makes of the image layers so far — taken
+// before the backdrop fixture below, which embeds a third source image
 const imgRoundTrip = await kd(async () => {
   const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
   const { ed } = window.kd;
@@ -250,6 +252,155 @@ const imgRoundTrip = await kd(async () => {
   const imgs = back.layers.filter((l) => l.type === "image");
   return { same: core.composite(back, { glyphs: ed.glyphs }).grid.equals(ed.comp.grid), images: imgs.length, recipeKept: imgs[0].cols === 40 && imgs[0].options.truecolor === true, assets: [...back.assets.keys()].filter((k) => k.startsWith("assets/images/")).length };
 });
+
+// --- cutting a background out of an image (a subject on a flat, opaque backdrop)
+const SKY = [80, 140, 220];
+const ball = join(out, "fixture-ball.png");
+writeFileSync(ball, png(640, 320, (x, y) => {
+  const r = Math.hypot(x - 320, y - 160) / 140;
+  if (r > 1) return [...SKY, 255];
+  const l = Math.max(0.15, 1 - r * 0.8);
+  return [Math.round(230 * l), Math.round(120 * l), Math.round(40 * l), 255];
+}));
+/** cells still showing the backdrop's colour — the halo a cell-by-cell delete leaves behind */
+const skyCells = () => kd(() => {
+  const ed = window.kd.ed, l = ed.active, g = l.cache ?? l.grid, pal = ed.doc.palette;
+  const skyish = (c) => { const p = pal[c]; return p && p[2] > p[0] + 40 && p[2] > 120; };
+  let present = 0, withSky = 0, halves = 0;
+  for (let i = 0; i < g.present.length; i++) {
+    const p = g.present[i];
+    if (!p) continue;
+    present++;
+    if (g.glyph[i] === 223 || g.glyph[i] === 220) halves++;
+    if (((p & 2) && skyish(g.fg[i])) || ((p & 4) && skyish(g.bg[i]))) withSky++;
+  }
+  return { present, withSky, halves };
+});
+await addImage(ball);
+const solid = await skyCells();
+check("image layer: an opaque backdrop arrives as cells like any other", solid.present > 1000 && solid.withSky > 0, JSON.stringify(solid));
+
+// the wand works on a live image layer, so Delete has to do something there too
+await kd(() => { window.kd.ed.chooseTool("wand"); });
+await page.mouse.click((await cellXY(1, 1)).x, (await cellXY(1, 1)).y);
+const wandedLive = await kd(() => window.kd.ed.selection?.count() ?? 0);
+await page.keyboard.press("Delete");
+await settle();
+const maskedLive = await kd(() => { const l = window.kd.ed.active; return { type: l.type, mask: !!l.mask?.enabled, hidden: l.mask ? [...l.mask.data].filter((v) => !v).length : 0 }; });
+check("Delete on a live layer hides the selection behind a mask instead of refusing",
+  maskedLive.type === "image" && maskedLive.mask && maskedLive.hidden === wandedLive, `${JSON.stringify(maskedLive)} for ${wandedLive} selected`);
+await kd(() => { window.kd.ed.undo(); window.kd.ed.setSelection(null); });
+await settle();
+check("undoing that gives the image back whole", await kd(() => !window.kd.ed.active.mask?.enabled));
+
+// keying the backdrop out in the source pixels, before shadeans can blend it into a cell
+await kd(() => [...document.querySelectorAll("label.check")].find((l) => l.textContent.includes("cut out background")).querySelector("input").click());
+await settle();
+await settle();
+const matted = await skyCells();
+const matteOpts = await kd(() => window.kd.ed.active.matte);
+check("cut out background: keys on the source's border colour by default",
+  matteOpts && matteOpts.edges === true && Math.abs(((matteOpts.color >> 16) & 0xff) - SKY[0]) < 12, JSON.stringify(matteOpts));
+check("cut out background: no cell is left holding any of the backdrop",
+  matted.withSky === 0 && matted.present > 200 && matted.present < solid.present * 0.6,
+  `${solid.present} cells with ${solid.withSky} showing the backdrop -> ${matted.present} with ${matted.withSky}`);
+check("cut out background: the silhouette lands on half blocks, not whole cells", matted.halves >= solid.halves, `${solid.halves} -> ${matted.halves} half blocks`);
+await shot("09b-image-matte");
+check("cut out background: the source image is untouched, so it can be taken back",
+  await kd(() => { const l = window.kd.ed.active; return l.type === "image" && l.cols > 0 && window.kd.ed.doc.assets.has(l.source); }));
+const mattedRoundTrip = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const back = core.loadProject(core.saveProject(window.kd.ed.doc));
+  const m = back.layers.find((l) => l.type === "image" && l.matte)?.matte;
+  return m ? { tolerance: m.tolerance, edges: m.edges, color: m.color } : null;
+});
+check("cut out background: the recipe is saved with the project", mattedRoundTrip !== null && mattedRoundTrip.edges === true, JSON.stringify(mattedRoundTrip));
+await kd(() => [...document.querySelectorAll("label.check")].find((l) => l.textContent.includes("cut out background")).querySelector("input").click());
+await settle();
+check("cut out background: turning it off brings the backdrop back", (await skyCells()).withSky > 0);
+
+// --- the other half of the problem: art that is already cells, with no source
+// to re-key. Rasterize the backdrop version and delete it the old way.
+const fringeAfterDelete = async (clean) => {
+  await kd((c) => { const ed = window.kd.ed; ed.cleanEdges = c; ed.setSelection(null); }, clean);
+  await kd(() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "rasterize").click());
+  await settle();
+  await kd(() => { window.kd.ed.chooseTool("wand"); });
+  const p = await cellXY(1, 1);
+  await page.mouse.click(p.x, p.y);
+  // the colour the selection is made of: what a delete takes away, and what it can leave behind
+  const key = await kd(async () => {
+    const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+    const ed = window.kd.ed, l = ed.active, sel = ed.selection;
+    return core.dominantColor(l.grid, { palette: ed.doc.palette, glyphs: ed.glyphs }, (x, y) => sel.has(x + l.x, y + l.y));
+  });
+  await page.keyboard.press("Delete");
+  await settle();
+  const left = await kd((k) => {
+    const ed = window.kd.ed, l = ed.active, g = l.grid, sel = ed.selection;
+    // a cell is "on the edge" when it survived the delete but touches what went
+    const onEdge = (x, y) => {
+      const dx = x + l.x, dy = y + l.y;
+      if (sel.has(dx, dy)) return false;
+      for (let j = -1; j <= 1; j++) for (let i = -1; i <= 1; i++) if (sel.has(dx + i, dy + j)) return true;
+      return false;
+    };
+    let present = 0, holdingKey = 0, edgeHoldingKey = 0;
+    for (let y = 0; y < g.height; y++) {
+      for (let x = 0; x < g.width; x++) {
+        const i = y * g.width + x, p = g.present[i];
+        if (!p) continue;
+        present++;
+        if (!(((p & 2) && g.fg[i] === k) || ((p & 4) && g.bg[i] === k))) continue;
+        holdingKey++;
+        if (onEdge(x, y)) edgeHoldingKey++;
+      }
+    }
+    return { present, holdingKey, edgeHoldingKey };
+  }, key);
+  const status = await kd(() => window.kd.ed.status);
+  await mod(["Meta"], () => page.keyboard.press("z"));   // undo the delete
+  await settle();
+  await mod(["Meta"], () => page.keyboard.press("z"));   // and the rasterize
+  await settle();
+  return { key, left, status };
+};
+const plain = await fringeAfterDelete(false);
+const cleaned = await fringeAfterDelete(true);
+check("without 'clean edges', a wand delete leaves the deleted colour behind along the edge",
+  plain.left.edgeHoldingKey > 0, `colour ${plain.key}: ${JSON.stringify(plain.left)}`);
+check("'clean edges' takes that colour out of the cells around the selection",
+  cleaned.left.edgeHoldingKey === 0,
+  `${plain.left.edgeHoldingKey} edge cells kept it -> ${cleaned.left.edgeHoldingKey}; ${cleaned.status}`);
+check("'clean edges' leaves the same colour alone away from the edge, so the subject keeps it",
+  cleaned.left.holdingKey === plain.left.holdingKey - plain.left.edgeHoldingKey,
+  `${plain.left.holdingKey} cells held it, ${plain.left.edgeHoldingKey} of them on the edge -> ${cleaned.left.holdingKey} left`);
+check("'clean edges' keeps the subject: it removes a colour, it does not erase cells wholesale",
+  cleaned.left.present > plain.left.present * 0.8, `${plain.left.present} cells -> ${cleaned.left.present}`);
+await shot("09c-clean-edges");
+await kd(() => { const ed = window.kd.ed; ed.setSelection(null); ed.removeLayer(ed.active.id); });
+
+// stray cells left dotted around a subject
+await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const l = core.createCellsLayer("specks", 10, 3);
+  l.grid.set(0, 0, { glyph: 219, fg: 7, bg: 0 });   // on its own
+  l.grid.set(9, 2, { glyph: 219, fg: 7, bg: 0 });   // and another
+  l.grid.set(5, 1, { glyph: 219, fg: 7, bg: 0 });   // a pair, which stays
+  l.grid.set(6, 1, { glyph: 219, fg: 7, bg: 0 });
+  window.kd.ed.addLayer(l, "specks");
+});
+await kd(() => { window.kd.ed.chooseTool("marquee"); });
+await kd(() => [...document.querySelectorAll("button")].find((b) => b.textContent.trim() === "despeckle").click());
+const despeckled = await kd(() => {
+  const g = window.kd.ed.active.grid;
+  return { left: [...g.present].filter(Boolean).length, pair: !!g.present[g.index(5, 1)] && !!g.present[g.index(6, 1)], status: window.kd.ed.status };
+});
+check("despeckle drops cells with nothing beside them and keeps the rest", despeckled.left === 2 && despeckled.pair, JSON.stringify(despeckled));
+await mod(["Meta"], () => page.keyboard.press("z"));
+check("undo brings the specks back", await kd(() => [...window.kd.ed.active.grid.present].filter(Boolean).length) === 4);
+await kd(() => { const ed = window.kd.ed; ed.removeLayer(ed.active.id); });
+
 // drop an image onto the canvas: it becomes a layer where it landed
 const dropAt = await cellXY(20, 6);
 const layersBeforeDrop = await kd(() => window.kd.ed.doc.layers.length);

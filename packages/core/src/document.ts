@@ -1,5 +1,6 @@
 import { type Color, type Rgb, VGA_PALETTE } from "./color.js";
 import { CellGrid } from "./grid.js";
+import type { ImageMatte } from "./matte.js";
 import type { CellMatch } from "./match.js";
 import type { Sauce } from "./formats/sauce.js";
 
@@ -129,6 +130,8 @@ export interface ImageLayer extends LayerBase {
   /** 0 = follow the image's aspect ratio */
   rows: number;
   options: ShadeansOptions;
+  /** cut a background out of the source before matching it; undefined = keep all of it */
+  matte?: ImageMatte;
   cache?: CellGrid;
 }
 
@@ -300,5 +303,5 @@ export function cloneLayer(layer: Layer, name = `${layer.name} copy`): Layer {
   if (rest.type === "prose") return { ...rest, ...base, fg: [...rest.fg], bg: [...rest.bg], cache: rest.cache?.clone() };
   if (rest.type === "reference") return { ...rest, ...base };
   if (rest.type === "shape") return { ...rest, ...base, cache: rest.cache?.clone() };
-  return { ...rest, ...base, options: { ...rest.options }, crop: rest.crop && { ...rest.crop }, cache: rest.cache?.clone() };
+  return { ...rest, ...base, options: { ...rest.options }, crop: rest.crop && { ...rest.crop }, matte: rest.matte && { ...rest.matte }, cache: rest.cache?.clone() };
 }

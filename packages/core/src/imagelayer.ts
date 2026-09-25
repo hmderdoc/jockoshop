@@ -1,6 +1,8 @@
 import { rgb } from "./color.js";
 import { type ImageLayer, type KdDocument, type ShadeansOptions, newLayerId } from "./document.js";
-import { CellGrid } from "./grid.js";
+import { type GlyphInfo, defaultGlyphInfo } from "./glyphs.js";
+import { CH_ALL, CellGrid } from "./grid.js";
+import { cellHalves, halfCell } from "./halves.js";
 
 /** shadeans' own defaults. autoChroma / localContrast undefined = its default for the colour mode. */
 export const SHADEANS_DEFAULTS: ShadeansOptions = {
@@ -21,18 +23,41 @@ export function shadeansOptionBlock(o: ShadeansOptions, iceColors: boolean): Flo
 }
 
 /**
- * shadeans-wasm result -> cells. `coverage` (one 0-255 value per cell, the mean
- * alpha of the source under it) leaves cells under transparent parts of the
- * image absent, so lower layers show through.
+ * shadeans-wasm result -> cells. `coverage` (mean alpha of the source under
+ * each cell) leaves cells under transparent parts of the image absent, so
+ * lower layers show through.
+ *
+ * Give it `cols * rows * 2` values — the top half of every cell, then the
+ * bottom — and a cell covered on one side only becomes a half block instead of
+ * appearing or vanishing whole. That is what keeps a matted silhouette from
+ * landing a whole cell out, and the compositor merges those halves with
+ * whatever is underneath.
  */
-export function gridFromShadeans(bytes: Uint8Array, cols: number, rows: number, coverage?: Uint8Array, alphaThreshold = 128): CellGrid {
+export function gridFromShadeans(
+  bytes: Uint8Array, cols: number, rows: number, coverage?: Uint8Array, alphaThreshold = 128,
+  glyphs: GlyphInfo = defaultGlyphInfo(),
+): CellGrid {
   const grid = new CellGrid(cols, rows);
+  const halved = coverage && coverage.length >= cols * rows * 2;
   for (let i = 0; i < cols * rows; i++) {
-    if (coverage && coverage[i] < alphaThreshold) continue;
+    let top = true, bottom = true;
+    if (halved) {
+      const x = i % cols, y = (i - x) / cols;
+      top = coverage![y * 2 * cols + x] >= alphaThreshold;
+      bottom = coverage![(y * 2 + 1) * cols + x] >= alphaThreshold;
+      if (!top && !bottom) continue;
+    } else if (coverage && coverage[i] < alphaThreshold) continue;
+
     const c = i * SHADEANS_CELL_BYTES;
-    if (bytes[c + 3]) {
-      grid.setAt(i, { glyph: bytes[c], fg: rgb(bytes[c + 4], bytes[c + 5], bytes[c + 6]), bg: rgb(bytes[c + 7], bytes[c + 8], bytes[c + 9]) });
-    } else grid.setAt(i, { glyph: bytes[c], fg: bytes[c + 1], bg: bytes[c + 2] });
+    const truecolor = bytes[c + 3] !== 0;
+    const glyph = bytes[c];
+    const fg = truecolor ? rgb(bytes[c + 4], bytes[c + 5], bytes[c + 6]) : bytes[c + 1];
+    const bg = truecolor ? rgb(bytes[c + 7], bytes[c + 8], bytes[c + 9]) : bytes[c + 2];
+    if (top && bottom) { grid.setAt(i, { glyph, fg, bg }); continue; }
+    // one half only: keep that half's colour, leave the other see-through
+    const [a, b] = cellHalves(glyph, fg, bg, CH_ALL, glyphs);
+    const keep = top ? a : b;
+    grid.setAt(i, halfCell(top, keep >= 0 ? keep : fg));
   }
   return grid;
 }

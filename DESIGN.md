@@ -238,6 +238,14 @@ Order is flexible; everything here is in scope.
    Free transform (`transform.ts`, the Move tool / Cmd+T): one handle model for every layer type; cells content or the
    selected cells are lifted, scaled nearest-neighbour and put back as one undo step.
    3D pictures: animated PNG of the wiggle (`encodeApng`, verified against Pillow) and a red/cyan anaglyph PNG.
+   Cutting a background out (`matte.ts`, `cleanup.ts`, `halves.ts`): keying happens in the source pixels, before
+   shadeans — a cell straddling a silhouette otherwise comes back as one character blending subject and background,
+   which nothing afterwards can separate. Keyed pixels lose their alpha and take the nearest kept colour ("bleed"),
+   so the matcher only sees subject colours; coverage is then sampled per *half* cell, so the edge lands on ▀▄ and
+   the compositor's existing half-block merge does the rest. For art that is already cells there is no source to
+   re-key, so `defringe` takes the deleted colour out of the cells around a selection instead — a half block keeps
+   its other half, a shade drawn in that colour loses its ink, that colour behind a character lets the layer below
+   through. Delete on a live layer cuts the selection out of the layer's mask rather than refusing.
    Joint (Moebius collaboration): `core/joint/` = protocol (RLE and messages byte-identical to libtextmode, tested
    against the vendored module) and `JointSync` (S = mirror of the server canvas; L = composite minus the Remote
    layer; DRAWs for the cells that changed in L, Remote cleared where a local edit supersedes it); `app/joint.ts` =

@@ -92,6 +92,12 @@ export class Editor {
   wand: WandOptions = { ...WAND_DEFAULTS };
   /** wand samples the flattened picture instead of the active layer */
   wandAllLayers = false;
+  /**
+   * Delete also takes the colour it removed out of the cells around the
+   * selection. Those straddled the silhouette, so a plain delete leaves them
+   * holding half a background — the halo around a cut-out image.
+   */
+  cleanEdges = true;
   clipboard: { grid: CellGrid; x: number; y: number } | null = null;
   /** whether palette-swap presets and randomize also move the greys / white */
   remapOptions: RemapOptions = { ...REMAP_DEFAULTS };

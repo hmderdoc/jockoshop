@@ -105,6 +105,15 @@ export class Stroke {
         this.edit.set(lx, ly, { glyph: g });
       }
     }
+    this.touch(x, y);
+  }
+
+  /**
+   * Note that a document cell changed, so the next flush redraws it. Edits made
+   * straight through `edit` rather than `at` — a clean-up pass outside the
+   * selection, say — have to say so themselves.
+   */
+  touch(x: number, y: number): void {
     const d = this.dirty;
     if (!d) this.dirty = { x, y, width: 1, height: 1 };
     else {
