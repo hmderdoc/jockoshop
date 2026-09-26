@@ -85,3 +85,38 @@ export function nearestIndex(c: Color, palette: readonly Rgb[] = VGA_PALETTE, co
   }
   return best;
 }
+
+/**
+ * The Commodore 64's sixteen colours, in the order the machine numbers them —
+ * which is not VGA's order and not VGA's colours. Matching PETSCII art against
+ * the VGA palette gets the shapes right and the colours wrong, so a document
+ * drawn for a C64 wants this as its palette.
+ *
+ * Values are the widely used Pepto measurements of the VIC-II's output.
+ */
+export const C64_PALETTE: readonly Rgb[] = [
+  [0, 0, 0], [255, 255, 255], [136, 57, 50], [103, 182, 189],
+  [139, 63, 150], [85, 160, 73], [64, 49, 141], [191, 206, 114],
+  [139, 84, 41], [87, 66, 0], [184, 105, 98], [80, 80, 80],
+  [120, 120, 120], [148, 224, 137], [120, 105, 196], [159, 159, 159],
+];
+
+/**
+ * The PETSCII control code that selects each C64 colour, by palette index —
+ * what a `.seq` file writes to change the foreground. Taken from Synchronet's
+ * `xpdev/petdefs.h`.
+ */
+export const C64_COLOR_CODES: readonly number[] = [
+  144, 5, 28, 159, 156, 30, 31, 158,
+  129, 149, 150, 151, 152, 153, 154, 155,
+];
+
+/** Whether a palette is the plain VGA one, so a file need not carry a copy of it. */
+export function isVgaPalette(palette: readonly Rgb[]): boolean {
+  if (palette.length < 16) return false;
+  for (let i = 0; i < 16; i++) {
+    const a = palette[i], b = VGA_PALETTE[i];
+    if (a[0] !== b[0] || a[1] !== b[1] || a[2] !== b[2]) return false;
+  }
+  return true;
+}

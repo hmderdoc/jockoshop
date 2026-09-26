@@ -1,5 +1,5 @@
 import {
-  ART_EXTENSIONS, type AspectRatio, aspectStretch, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
+  ART_EXTENSIONS, type AspectRatio, aspectStretch, isVgaPalette, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
   deviceShiftPx, documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
   renderDepthView, renderGrid, saveProject, standardFont, stretchRows,
 } from "@killerdraw/core";
@@ -319,7 +319,12 @@ async function start(): Promise<void> {
     item(".bin", "binary text (even width)", "bin", () => encodeBin(flat(), exportOpts())),
     // XBIN is the format that carries its own font, which is the point of choosing
     // it: the file opens in the font it was drawn in, whatever the viewer defaults to
-    item(".xb", "XBin, compressed", "xb", () => encodeXbin(flat(), { iceColors: ed.doc.iceColors, sauce: ed.doc.sauce, fontBytes: ed.font.glyphs })),
+    item(".xb", "XBin, compressed", "xb", () => encodeXbin(flat(), {
+      iceColors: ed.doc.iceColors, sauce: ed.doc.sauce, fontBytes: ed.font.glyphs,
+      // a custom palette is most of the reason XBIN exists — of 16 real XBINs
+      // from 16colo.rs packs, 15 carry one. Only the plain VGA one is left out.
+      ...(isVgaPalette(ed.doc.palette) ? {} : { palette: ed.doc.palette }),
+    }), "Carries its own font, and its palette when the document has one"),
     item(".tnd", "TundraDraw, 24-bit", "tnd", () => encodeTundra(flat(), ed.doc.palette), "Every colour exact; TundraDraw and PabloDraw read it"),
     item(".msg", "Synchronet Ctrl-A", "msg", () => encodeCtrlA(flat(), ed.doc.palette), "Colour codes for message bodies and menus; PabloDraw reads it too"),
     item(".txt", "text, CP437", "txt", () => encodeText(flat(), "cp437"), "Characters only"),
