@@ -34,6 +34,7 @@ export * from "./formats/bin.js";
 export * from "./formats/xbin.js";
 export * from "./formats/png.js";
 export * from "./formats/tundra.js";
+export * from "./formats/seq.js";
 export * from "./formats/ctrla.js";
 export * from "./formats/text.js";
 export * from "./formats/legacy.js";
