@@ -524,20 +524,61 @@ await new Promise((r) => setTimeout(r, 1500));
 await page.mouse.up();
 await settle();
 const d1 = await kd(() => window.kd.ed.active.depth ?? 0);
-// the picture follows a held spin button: canvas height in the top bar
-const hBtn = await kd(() => { const b = [...document.querySelectorAll(".topbar .num")][1].querySelector(".spin:first-child").getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; });
+// canvas height: typing a number must not resize on every digit — each step is
+// a real resize of the document, not a slider
 const h0 = await kd(() => ({ doc: window.kd.ed.doc.height, canvas: document.querySelector("canvas.art").height }));
-await page.mouse.move(hBtn.x, hBtn.y);
-await page.mouse.down();
-await new Promise((r) => setTimeout(r, 700));
-const mid = await kd(() => ({ doc: window.kd.ed.doc.height, canvas: document.querySelector("canvas.art").height, undo: window.kd.ed.history.position }));
-await page.mouse.up();
+await kd(() => { const i = document.querySelector(".topbar .num input"); i.focus(); i.value = ""; });
+await page.keyboard.type("34", { delay: 60 });   // typed at a human pace, inside the field's 350 ms settle
+const whileTyping = await kd(() => window.kd.ed.doc.height);
+await page.keyboard.press("Enter");
 await settle();
-const h1 = await kd(() => ({ doc: window.kd.ed.doc.height, canvas: document.querySelector("canvas.art").height, undo: window.kd.ed.history.position }));
-check("the canvas grows while the height spin button is still held", mid.doc > h0.doc && mid.canvas === mid.doc * 16, `held: ${h0.doc} -> ${mid.doc} rows, canvas ${mid.canvas}px`);
-check("…and the hold becomes one undo step on release", h1.doc === mid.doc && h1.undo !== mid.undo);
+const h1 = await kd(() => ({ doc: window.kd.ed.doc.height, canvas: document.querySelector("canvas.art").height }));
+check("typing a canvas height does not resize on every digit", whileTyping === h0.doc, `${h0.doc} rows while typing "34", then ${h1.doc}`);
+check("…and applies once, when the number is finished", h1.doc === 34 && h1.canvas === 34 * 16, JSON.stringify(h1));
 await mod(["Meta"], () => page.keyboard.press("z"));
-check("undoing it restores the original height", await kd(() => window.kd.ed.doc.height) === h0.doc, await kd(() => `height ${window.kd.ed.doc.height}, focus ${document.activeElement?.tagName}, status "${window.kd.ed.status}"`));
+await settle();
+check("undoing it restores the original height", await kd(() => window.kd.ed.doc.height) === h0.doc, await kd(() => `height ${window.kd.ed.doc.height}`));
+// width is the set of widths art is drawn at, applied in one go
+const widths = await kd(() => [...[...document.querySelectorAll(".topbar select")][0].options].map((o) => o.textContent));
+check("width offers the widths art is actually drawn at, plus Custom",
+  widths.some((w) => w.startsWith("40")) && widths.some((w) => w.startsWith("80")) && widths.some((w) => w.startsWith("132")) && widths.includes("Custom…"),
+  JSON.stringify(widths));
+const w0 = await kd(() => window.kd.ed.doc.width);
+await kd(() => { const s = [...document.querySelectorAll(".topbar select")][0]; s.value = "40"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await settle();
+check("choosing one applies it in a single step", await kd(() => window.kd.ed.doc.width) === 40);
+await mod(["Meta"], () => page.keyboard.press("z"));
+await settle();
+check("and it is one undo away", await kd(() => window.kd.ed.doc.width) === w0);
+
+// typing past the last row adds rows rather than stopping
+// the typewriter needs a cells layer to put a caret on
+await kd(() => {
+  const ed = window.kd.ed;
+  ed.autoGrowHeight = true;
+  const cells = ed.doc.layers.find((l) => l.type === "cells");
+  if (cells) ed.activeId = cells.id;
+  ed.chooseTool("text");
+  ed.emit("doc");
+});
+await settle();
+const lastRow = await kd(() => window.kd.ed.doc.height - 1);
+const bottom = await cellXY(2, lastRow);
+await page.mouse.click(bottom.x, bottom.y);
+await settle();
+const grewFrom = await kd(() => window.kd.ed.doc.height);
+await page.keyboard.press("Enter");
+await settle();
+const grewTo = await kd(() => ({ h: window.kd.ed.doc.height, caret: window.kd.view?.hoverCell ? 1 : 1 }));
+check("the canvas gains a row when the typewriter caret runs off the bottom", grewTo.h === grewFrom + 1, `${grewFrom} -> ${grewTo.h}`);
+await mod(["Meta"], () => page.keyboard.press("z"));
+await settle();
+check("…and that row is one undo away", await kd(() => window.kd.ed.doc.height) === grewFrom);
+await kd(() => { const ed = window.kd.ed; ed.autoGrowHeight = false; });
+await page.keyboard.press("Enter");
+await settle();
+check("with growing switched off the caret stops at the last row instead", await kd(() => window.kd.ed.doc.height) === grewFrom);
+await kd(() => { const ed = window.kd.ed; ed.autoGrowHeight = true; ed.chooseTool("brush"); });
 check("holding a spin button repeats (1.5 s hold steps many times), as one undo step", d0 - d1 >= 15 && await kd((p) => window.kd.ed.history.position !== p, undoCount), `${d0} -> ${d1} in 1.5 s`);
 
 

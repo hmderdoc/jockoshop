@@ -12,7 +12,7 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
-import { confirmUnsaved, exportDialog, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
+import { confirmUnsaved, exportDialog, modal, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
 import { JointClient } from "./joint.js";
 import { jointDialog, jointPanel } from "./jointui.js";
 import { pickBitmapFont } from "./fontpicker.js";
@@ -20,10 +20,11 @@ import { type Binding, indexBindings, lookup } from "./keymap.js";
 import { buildLeft } from "./left.js";
 import { buildRight } from "./right.js";
 import { liveProp, setBrushSize } from "./sections.js";
+
 import { importImage, scheduleImageRefresh } from "./shadeans.js";
 import { copySelection, cutSelection, deleteSelection, paste, selectAll, selectInverse, selectNone } from "./selectionops.js";
 import { createSelectTools, createTools, pickUp } from "./tools.js";
-import { colorName, download, field, glyphLabel, h } from "./ui.js";
+import { colorName, download, field, glyphLabel, h, numberInput } from "./ui.js";
 import { CanvasView } from "./view.js";
 
 const ART = ART_EXTENSIONS;
@@ -206,14 +207,57 @@ async function start(): Promise<void> {
     walk(ed.doc.layers);
   };
 
+  /**
+   * The widths art is actually drawn at. A width is a decision, not something
+   * to arrive at by holding a spinner and resizing the canvas at every step on
+   * the way — so these apply in one go, and anything else goes through a
+   * dialog with an Apply button.
+   */
+  const WIDTHS: [number, string][] = [[40, "C64"], [77, "BBS ad"], [80, "classic"], [132, "widescreen"], [160, "double wide"]];
+  const setCanvas = (patch: { width?: number; height?: number }): void => {
+    if ((patch.width ?? ed.doc.width) === ed.doc.width && (patch.height ?? ed.doc.height) === ed.doc.height) return;
+    ed.setProps("Canvas size", ed.doc, patch as Partial<typeof ed.doc>);
+  };
+  const customWidth = (): void => {
+    const field = h("input", { type: "number", min: 1, max: 500, value: String(ed.doc.width), style: "width:90px" });
+    const close = (): void => backdrop.remove();
+    const apply = (): void => { const n = Math.round(Number(field.value)); close(); if (n >= 1 && n <= 500) setCanvas({ width: n }); };
+    const backdrop = modal("Canvas width", [
+      h("p.hint", {}, "Nothing changes until Apply. Layers keep whatever falls outside, so a narrower canvas loses nothing."),
+      h("div.row", {}, field, h("span.muted", {}, "columns")),
+    ], [h("button", { onclick: close }, "Cancel"), h("button.primary", { onclick: apply }, "Apply")], 380);
+    field.focus();
+    field.addEventListener("keydown", (e) => { if (e.key === "Enter") apply(); });
+  };
+
   const size = h("span.row");
-  const renderSize = (): void => size.replaceChildren(
-    liveProp(ed, ed.doc, "width", "Canvas width", ed.doc.width, { min: 1, max: 500, width: 54 }, (v) => v ?? ed.doc.width),
-    "×", liveProp(ed, ed.doc, "height", "Canvas height", ed.doc.height, { min: 1, max: 5000, width: 60 }, (v) => v ?? ed.doc.height),
+  /**
+   * Built once and kept, not rebuilt with the row: applying a height re-renders
+   * the top bar, and a field replaced under the cursor loses the focus and the
+   * rest of the number being typed.
+   */
+  const heightField = numberInput(ed.doc.height, { min: 1, max: 5000, width: 60 }, (v) => setCanvas({ height: v ?? ed.doc.height }));
+  const renderSize = (): void => {
+    if (document.activeElement !== heightField.input) heightField.input.value = String(ed.doc.height);
+    const known = WIDTHS.some(([w]) => w === ed.doc.width);
+    const widthPick = h("select", { title: "The width the art is drawn at", onchange: () => {
+      if (widthPick.value === "custom") { renderSize(); customWidth(); return; }
+      setCanvas({ width: Number(widthPick.value) });
+    } });
+    if (!known) widthPick.append(h("option", { value: String(ed.doc.width), selected: true }, `${ed.doc.width}`));
+    for (const [w, why] of WIDTHS) widthPick.append(h("option", { value: String(w), selected: w === ed.doc.width }, `${w} ${why}`));
+    widthPick.append(h("option", { value: "custom" }, "Custom…"));
+    size.replaceChildren(
+      widthPick,
+      // height commits when you stop, not on every digit: each step is a real resize
+      "×", heightField,
+      h("label.check", { title: "Typing past the last row adds rows instead of stopping" },
+        h("input", { type: "checkbox", checked: ed.autoGrowHeight, onchange: () => { ed.autoGrowHeight = !ed.autoGrowHeight; ed.emit("ui"); } }), "grow"),
     h("label.check", { title: "iCE colours: 16 background colours instead of blink" },
       h("input", { type: "checkbox", checked: ed.doc.iceColors, onchange: () => ed.setProps("iCE colours", ed.doc, { iceColors: !ed.doc.iceColors }, reconvertImages) }), "iCE"),
     h("label.check", { title: "9-pixel cells, as VGA text mode drew them: every cell is a pixel wider, and the 9th column repeats the 8th for the box-drawing and block characters (CP437 192-223) so ─── and ███ join up. Recorded in SAUCE." },
       h("input", { type: "checkbox", checked: ed.doc.letterSpacing9px, onchange: () => ed.setProps("9px letter spacing", ed.doc, { letterSpacing9px: !ed.doc.letterSpacing9px }) }), "9px"));
+  };
 
   /**
    * The bitmap font: what the art is drawn in, and what SAUCE records. It

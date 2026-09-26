@@ -98,6 +98,12 @@ export class Editor {
    * holding half a background — the halo around a cut-out image.
    */
   cleanEdges = true;
+  /**
+   * The canvas gains rows when the typewriter caret runs off the bottom,
+   * rather than stopping. Art grows downwards as it is written and nobody
+   * wants to go and resize the canvas mid-sentence.
+   */
+  autoGrowHeight = true;
   clipboard: { grid: CellGrid; x: number; y: number } | null = null;
   /** whether palette-swap presets and randomize also move the greys / white */
   remapOptions: RemapOptions = { ...REMAP_DEFAULTS };

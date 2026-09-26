@@ -1,4 +1,4 @@
-import {
+import { canvasResizeCommand,
   CH_BG, CH_FG, CH_GLYPH, type CellGrid, type CellsLayer, type Color, type Command, type ContentLayer, GlyphClass,
   GridEdit, type Rect, type SelectMode, Selection, cellPatchCommand,
   type ShapeKind, type ShapeLayer, type ShapePlan, colorsEqual, cp437Encode, createProseLayer, createShapeLayer,
@@ -493,12 +493,19 @@ export function createTools(ed: Editor): Tool[] {
         if (ed.prose.layer) return ed.prose.keydown(e);
         if (!caret) return false;
         const W = ed.doc.width, H = ed.doc.height;
+        // the caret may walk off the bottom: give it another row instead of stopping
+        const downTo = (y: number): number => {
+          if (y < H) return y;
+          if (!ed.autoGrowHeight) return H - 1;
+          ed.run(canvasResizeCommand(ed.doc, { top: 0, bottom: y + 1 - H, left: 0, right: 0 }));
+          return y;
+        };
         if (e.key === "Escape") caret = null;
         else if (e.key === "ArrowLeft") caret.x = Math.max(0, caret.x - 1);
         else if (e.key === "ArrowRight") caret.x = Math.min(W - 1, caret.x + 1);
         else if (e.key === "ArrowUp") caret.y = Math.max(0, caret.y - 1);
-        else if (e.key === "ArrowDown") caret.y = Math.min(H - 1, caret.y + 1);
-        else if (e.key === "Enter") { caret.x = caret.home; caret.y = Math.min(H - 1, caret.y + 1); }
+        else if (e.key === "ArrowDown") caret.y = downTo(caret.y + 1);
+        else if (e.key === "Enter") { caret.x = caret.home; caret.y = downTo(caret.y + 1); }
         else if (e.key === "Backspace") { if (caret.x > 0) { caret.x--; typeCell(caret.x, caret.y, null); } }
         else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey) {
           typeCell(caret.x, caret.y, { glyph: cp437Encode(e.key)[0] });
