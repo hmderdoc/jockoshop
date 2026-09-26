@@ -196,6 +196,7 @@ async function start(): Promise<void> {
     const { font: next, note } = await fonts.forDocument(ed.doc);
     if (FontStore.key(ed.doc) !== key) return;   // the document moved on while we fetched
     ed.setFont(next);
+    reconvertImages();   // which converter an image wants depends on the font
     if (note) ed.setStatus(note);
   };
 

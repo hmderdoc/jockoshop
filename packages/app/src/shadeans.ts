@@ -1,6 +1,7 @@
 import {
-  type CellGrid, type GlyphInfo, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES, addImageAsset,
-  applyMatte, borderColor, createImageLayer, gridFromShadeans, shadeansOptionBlock,
+  type BitmapFont, type CellGrid, type GlyphInfo, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES,
+  addImageAsset, applyMatte, borderColor, createImageLayer, gridFromShadeans, hasCp437Ramp, matchImageToFont,
+  shadeansOptionBlock,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 
@@ -72,14 +73,35 @@ export async function rowsForAspect(width: number, height: number, cols: number)
   return Math.max(1, (await shadeans()).kd_rows_for_aspect(width, height, cols));
 }
 
+/** What the editor is drawing in, so a conversion can target the real font. */
+export interface FontView { font?: BitmapFont; glyphs?: GlyphInfo }
+
+/**
+ * Which converter a font wants. shadeans spells cells with CP437's ░▒▓█ and
+ * half blocks; every IBM codepage has those, and for them it is much the
+ * better tool — it dithers and keeps neighbours coherent, which a plain
+ * least-squares match does not. Where the font has no such ramp (Amiga, C64,
+ * a font embedded in an XBIN) those codes are other characters entirely, so
+ * the match reads the bitmaps instead.
+ */
+export function convertsWithFont(font: BitmapFont | undefined): font is BitmapFont {
+  return !!font && !hasCp437Ramp(font);
+}
+
 /** Regenerate an image layer's cells from its source image and settings. */
-export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, glyphs?: GlyphInfo): Promise<void> {
+export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, view?: FontView): Promise<void> {
+  const glyphs = view?.glyphs;
+  const font = view?.font;
   const bytes = doc.assets.get(layer.source);
   if (!bytes) throw new Error(`image asset not in document: ${layer.source}`);
   const bmp = await bitmapOf(bytes);
   const crop = layer.crop ?? { x: 0, y: 0, width: bmp.width, height: bmp.height };
   const cols = Math.max(1, layer.cols);
-  const rows = layer.rows > 0 ? layer.rows : await rowsForAspect(crop.width, crop.height, cols);
+  // rowsForAspect lives in the wasm and assumes 16-row cells; any other font
+  // needs the aspect worked out against its own height or the picture squashes
+  const rows = layer.rows > 0 ? layer.rows
+    : font && font.height !== 16 ? Math.max(1, Math.round((crop.height / crop.width) * cols * 8 / font.height))
+    : await rowsForAspect(crop.width, crop.height, cols);
 
   const canvas = new OffscreenCanvas(crop.width, crop.height);
   const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
@@ -107,6 +129,17 @@ export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, glyp
     const a = sctx.getImageData(0, 0, cols, rows * 2).data;
     coverage = Uint8Array.from({ length: cols * rows * 2 }, (_, i) => a[i * 4 + 3]);
   }
+  if (convertsWithFont(font)) {
+    // half-cell coverage is a CP437 trick (it makes ▀▄); this match works whole cells
+    const whole = coverage && Uint8Array.from({ length: cols * rows }, (_, i) => {
+      const x = i % cols, y = (i - x) / cols;
+      return Math.max(coverage[y * 2 * cols + x], coverage[(y * 2 + 1) * cols + x]);
+    });
+    layer.cache = matchImageToFont(rgba, crop.width, crop.height, cols, rows, font, doc.palette, {
+      truecolor: layer.options.truecolor, iceColors: doc.iceColors, coverage: whole,
+    });
+    return;
+  }
   layer.cache = await convertPixels(rgba, crop.width, crop.height, cols, rows, layer.options, doc.iceColors, coverage, glyphs);
 }
 
@@ -118,7 +151,7 @@ const jobs = new WeakMap<ImageLayer, { again: boolean }>();
  * dragged slider never queues up work.
  */
 export async function scheduleImageRefresh(
-  ed: { doc: KdDocument; glyphs?: GlyphInfo; recomposite(): void; setStatus(s: string): void }, layer: ImageLayer,
+  ed: { doc: KdDocument } & FontView & { recomposite(): void; setStatus(s: string): void }, layer: ImageLayer,
 ): Promise<void> {
   const job = jobs.get(layer);
   if (job) { job.again = true; return; }
@@ -128,7 +161,7 @@ export async function scheduleImageRefresh(
     while (mine.again) {
       mine.again = false;
       const t0 = performance.now();
-      await refreshImageLayer(ed.doc, layer, ed.glyphs);
+      await refreshImageLayer(ed.doc, layer, ed);
       ed.recomposite();
       ed.setStatus(`shadeans: ${layer.cache!.width}×${layer.cache!.height} cells in ${Math.round(performance.now() - t0)} ms`);
     }
@@ -144,7 +177,7 @@ export async function importImage(ed: Editor, name: string, bytes: Uint8Array, a
   const layer = createImageLayer(name.replace(/\.[^.]+$/, ""), addImageAsset(ed.doc, name, bytes), ed.doc.width);
   if (at) { layer.x = at.x; layer.y = at.y; }
   try {
-    await refreshImageLayer(ed.doc, layer, ed.glyphs);
+    await refreshImageLayer(ed.doc, layer, ed);
     ed.addLayer(layer, "Add image layer");
   } catch (err) { ed.setStatus(`Could not add ${name}: ${(err as Error).message}`); }
 }

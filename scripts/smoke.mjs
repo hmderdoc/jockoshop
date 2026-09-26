@@ -319,6 +319,42 @@ await kd(() => [...document.querySelectorAll("label.check")].find((l) => l.textC
 await settle();
 check("cut out background: turning it off brings the backdrop back", (await skyCells()).withSky > 0);
 
+// an image on a font with no CP437 ramp is matched against that font's own
+// characters instead — shadeans' shade codes are other letters entirely there
+const perFont = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const sh = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/app/src/shadeans.ts");
+  const load = async (f) => core.parseRawFont(new Uint8Array(await (await fetch(`fonts/${f.split("/").map(encodeURIComponent).join("/")}`)).arrayBuffer()));
+  const cp437 = await load("ibm/CP437.F16"), petscii = await load("c64/PETSCII unshifted.F08");
+  return {
+    cp437Ramp: core.hasCp437Ramp(cp437), petsciiRamp: core.hasCp437Ramp(petscii),
+    cp437Uses: sh.convertsWithFont(cp437), petsciiUses: sh.convertsWithFont(petscii),
+  };
+});
+check("shadeans keeps the CP437 fonts, where its shade ramp is real",
+  perFont.cp437Ramp === true && perFont.cp437Uses === false, JSON.stringify(perFont));
+check("a font without that ramp is matched against its own characters",
+  perFont.petsciiRamp === false && perFont.petsciiUses === true, JSON.stringify(perFont));
+
+await kd((n) => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName: n }); }, "C64 PETSCII unshifted");
+await page.waitForFunction(() => window.kd.ed.font.height === 8, { timeout: 5000 }).catch(() => {});
+await settle();
+await settle();
+const inPetscii = await kd(() => {
+  const ed = window.kd.ed, l = ed.doc.layers.find((x) => x.type === "image");
+  if (!l?.cache) return null;
+  const g = l.cache, used = new Set(), font = ed.font;
+  const drawn = new Set();
+  for (let c = 0; c < 256; c++) { let ink = 0; for (let y = 0; y < font.height; y++) for (let r = font.glyphs[c * font.height + y]; r; r &= r - 1) ink++; if (ink) drawn.add(c); }
+  for (let i = 0; i < g.glyph.length; i++) if (g.present[i]) used.add(g.glyph[i]);
+  return { cells: `${g.width}x${g.height}`, distinct: used.size, allDrawn: [...used].every((c) => drawn.has(c) || c === 32) };
+});
+check("switching the document to PETSCII re-converts its image layers into PETSCII's own shapes",
+  inPetscii && inPetscii.distinct > 3 && inPetscii.allDrawn, JSON.stringify(inPetscii));
+await kd(() => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName: "IBM VGA" }); });
+await settle();
+await settle();
+
 // --- the other half of the problem: art that is already cells, with no source
 // to re-key. Rasterize the backdrop version and delete it the old way.
 const fringeAfterDelete = async (clean) => {

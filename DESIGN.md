@@ -246,6 +246,16 @@ Order is flexible; everything here is in scope.
    blocks come from the bitmaps and a custom font may have none. Verified against 48,211 real SAUCE records from
    the corpus in `ansi-llm/raw_ansi_art`: 99.3% resolve exactly, and everything unresolved is junk in the field
    (tool names, artist handles, null bytes) rather than a font we lack.
+   Image conversion off CP437 (`fontmatch.ts`): shadeans hardcodes CP437's ░▒▓█ and half blocks (`0xB0-0xB2`,
+   `0xDB-0xDF`). Measured ink coverage at those codes — CP437 25/50/75/100%, Topaz 19/31/23/39%, PETSCII
+   53/70/66/56% — so off the IBM codepages it is not a ramp at all. `matchImageToFont` reads the bitmaps instead:
+   per cell, per distinct shape, the shape splits the pixels in two, each group's mean is its best colour and the
+   leftover is the error; a shortlist is then re-scored with the colours quantised, since picking on free colours
+   can choose a shape whose two colours round together and come out flat. `hasCp437Ramp` routes: shadeans keeps the
+   IBM fonts. Note the match has *lower* squared error on CP437 too (-25%) and still looks worse — banded rather
+   than dithered — which is the whole reason shadeans exists, and a reminder that this metric is not the goal.
+   `pickFixedBg` exists for the C64's one-global-background constraint; it can only raise error, which is what a
+   constraint does. Not done for real PETSCII: the C64 palette, 40x25, and any dithering under those constraints.
    TheDraw font picking (`app/fonts.ts`): with ~3,500 fonts the search *is* the feature, so the list sorts by any
    column and filters by a row range rather than a bare maximum — a max on its own still shows every shorter font,
    which was the complaint. `randomFontOfHeight` keeps the height fixed on purpose: a random font that also resizes

@@ -16,7 +16,7 @@ import {
   copySelection, cutSelection, deleteSelection, despeckleLayer, fillSelection, maskLayerFromSelection, paste,
   selectAll, selectFromMask, selectInverse, selectLayerContent, selectNone,
 } from "./selectionops.js";
-import { type ImageRecipe, commitImage, imageSize, sampleBorderColor, scheduleImageRefresh, snapshotImage } from "./shadeans.js";
+import { type ImageRecipe, commitImage, convertsWithFont, imageSize, sampleBorderColor, scheduleImageRefresh, snapshotImage } from "./shadeans.js";
 import type { Tool } from "./tools.js";
 import { colorName, colorSelect, cssColor, field, glyphLabel, h, numberInput, parseGlyph } from "./ui.js";
 
@@ -630,6 +630,7 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
   };
 
   const tc = layer.options.truecolor, crop = layer.crop;
+  const byFont = convertsWithFont(ed.font);
   let size: { width: number; height: number } | null = null;
   void imageSize(ed.doc, layer.source).then((sz) => { size = sz; });
   const applyCrop = (patch: Partial<NonNullable<ImageLayer["crop"]>>): void => {
@@ -652,6 +653,8 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
         flag("24-bit", "truecolor", "Exact colours per cell instead of the 16-colour palette"),
         flag("blocks only", "blocks", "Pixel-art baseline: no shade characters"),
         flag("levels", "autoLevels", "Stretch the source to the full black-to-white range")),
+      byFont && h("p.hint", { title: "shadeans spells cells with CP437's ░▒▓█ and half blocks. This font has no such characters at those codes, so the picture is matched against the shapes it does have." },
+        "Matched against this font's own characters — it has no CP437 shade ramp. The dither settings below are shadeans' and do not apply; pick an IBM font to get them back."),
       !tc && slider("texture", "lambda", 0.01, 1, 0.01, 0.1, "How visible dither texture is. 1 = pixel art; lower = more and bolder shading"),
       !tc && slider("coherence", "coherence", 0, 0.006, 0.0005, 0.002, "Pulls neighbouring cells onto shared colours. 0 = off, 0.006 = flat"),
       slider("contrast", "contrast", 0.5, 2, 0.05, 1, "Lightness contrast of the source"),
