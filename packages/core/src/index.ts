@@ -1,6 +1,7 @@
 export * from "./color.js";
 export * from "./cp437.js";
 export * from "./font.js";
+export * from "./fontnames.js";
 export * from "./glyphs.js";
 export * from "./grid.js";
 export * from "./halves.js";

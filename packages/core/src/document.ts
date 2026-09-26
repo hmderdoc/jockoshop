@@ -1,5 +1,6 @@
 import { type Color, type Rgb, VGA_PALETTE } from "./color.js";
 import { CellGrid } from "./grid.js";
+import type { AspectRatio } from "./formats/sauce.js";
 import type { ImageMatte } from "./matte.js";
 import type { CellMatch } from "./match.js";
 import type { Sauce } from "./formats/sauce.js";
@@ -212,6 +213,13 @@ export interface KdDocument {
   /** on: background 8-15 is a bright colour. off: it means blink. */
   iceColors: boolean;
   letterSpacing9px: boolean;
+  /**
+   * What the art's pixels were meant to be shaped like, as SAUCE records it.
+   * "stretch" = drawn for a 4:3 CRT, so it wants stretching vertically to look
+   * right on square pixels; "square" = drawn for square pixels already;
+   * "none" = the file says nothing, so it is shown as it is.
+   */
+  aspectRatio: AspectRatio;
   fontName: string;
   palette: Rgb[];
   sauce: Sauce;
@@ -238,6 +246,7 @@ export function createDocument(width = 80, height = 25): KdDocument {
     width, height,
     iceColors: false,
     letterSpacing9px: false,
+    aspectRatio: "none",
     fontName: "IBM VGA",
     palette: VGA_PALETTE.map((c) => [c[0], c[1], c[2]] as const),
     sauce: { title: "", author: "", group: "", date: "", comments: [] },

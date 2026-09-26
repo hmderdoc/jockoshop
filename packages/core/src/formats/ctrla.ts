@@ -9,7 +9,7 @@
 import { CH_ALL, CellGrid } from "../grid.js";
 import { type Rgb, VGA_PALETTE, nearestIndex } from "../color.js";
 import type { ImportedArt } from "./ansi.js";
-import { parseSauce } from "./sauce.js";
+import { aspectFromFlags, parseSauce } from "./sauce.js";
 
 const FG = "KBGCRMYW";      // indexed by VGA colour 0-7
 const BG = "04261537";      // Ctrl-A digit for VGA background 0-7
@@ -61,7 +61,7 @@ export function parseCtrlA(bytes: Uint8Array, opts: { width?: number } = {}): Im
   const grid = CellGrid.filled(W, H, 32, 7, 0);
   rows.forEach((row, ry) => row.forEach((cell, rx) => { if (cell) grid.set(rx, ry, cell); }));
   grid.present.fill(CH_ALL);
-  return { grid, sauce: found?.sauce ?? null, iceColors: false, letterSpacing9px: false, fontName: found?.sauce.fontName || "IBM VGA" };
+  return { grid, sauce: found?.sauce ?? null, iceColors: false, letterSpacing9px: false, aspectRatio: aspectFromFlags(found?.sauce.flags ?? 0), fontName: found?.sauce.fontName || "IBM VGA" };
 }
 
 /** 24-bit colours fall to the nearest palette entry; a background of 8-15 is written as blink. */

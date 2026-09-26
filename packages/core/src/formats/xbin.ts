@@ -2,7 +2,7 @@ import type { Rgb } from "../color.js";
 import type { CellGrid } from "../grid.js";
 import type { ImportedArt } from "./ansi.js";
 import { cellsFromPairs, pairsFromCells } from "./bin.js";
-import { SAUCE_DATATYPE_XBIN, type Sauce, encodeSauce, parseSauce } from "./sauce.js";
+import { SAUCE_DATATYPE_XBIN, type Sauce, aspectFromFlags, encodeSauce, parseSauce } from "./sauce.js";
 
 const FLAG_PALETTE = 1, FLAG_FONT = 2, FLAG_COMPRESS = 4, FLAG_NONBLINK = 8, FLAG_512 = 16;
 
@@ -64,6 +64,7 @@ export function parseXbin(bytes: Uint8Array): ImportedArt {
     sauce: found?.sauce ?? null,
     iceColors: (flags & FLAG_NONBLINK) !== 0,
     letterSpacing9px: false,
+    aspectRatio: aspectFromFlags(found?.sauce.flags ?? 0),
     fontName: found?.sauce.fontName || "IBM VGA",
     palette, fontBytes,
   };

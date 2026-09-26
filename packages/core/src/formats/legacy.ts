@@ -9,7 +9,7 @@ import type { Rgb } from "../color.js";
 import { CH_ALL, CellGrid } from "../grid.js";
 import type { ImportedArt } from "./ansi.js";
 import { cellsFromPairs } from "./bin.js";
-import { parseSauce } from "./sauce.js";
+import { aspectFromFlags, parseSauce } from "./sauce.js";
 
 const six = (v: number): number => ((v & 63) << 2) | ((v & 63) >> 4);
 
@@ -24,7 +24,7 @@ export function parseAdf(bytes: Uint8Array): ImportedArt {
   const fontBytes = bytes.slice(193, 193 + 4096);
   const data = bytes.subarray(193 + 4096, end);
   const height = Math.max(1, Math.ceil(data.length / 160));
-  return { grid: cellsFromPairs(data, 80, height), sauce: found?.sauce ?? null, iceColors: true, letterSpacing9px: false, fontName: "IBM VGA", palette, fontBytes };
+  return { grid: cellsFromPairs(data, 80, height), sauce: found?.sauce ?? null, iceColors: true, letterSpacing9px: false, aspectRatio: "none", fontName: "IBM VGA", palette, fontBytes };
 }
 
 export function isIdf(bytes: Uint8Array): boolean {
@@ -53,7 +53,7 @@ export function parseIdf(bytes: Uint8Array): ImportedArt {
   const fontBytes = tail >= 12 ? bytes.slice(tail, tail + 4096) : undefined;
   const palette: Rgb[] | undefined = tail >= 12 ? Array.from({ length: 16 }, (_, n) => [six(bytes[tail + 4096 + n * 3]), six(bytes[tail + 4097 + n * 3]), six(bytes[tail + 4098 + n * 3])] as Rgb) : undefined;
   const height = Math.max(1, Math.ceil(pairs.length / 2 / W));
-  return { grid: cellsFromPairs(Uint8Array.from(pairs), W, height), sauce: found?.sauce ?? null, iceColors: true, letterSpacing9px: false, fontName: "IBM VGA", palette, fontBytes };
+  return { grid: cellsFromPairs(Uint8Array.from(pairs), W, height), sauce: found?.sauce ?? null, iceColors: true, letterSpacing9px: false, aspectRatio: "none", fontName: "IBM VGA", palette, fontBytes };
 }
 
 export function parseAvatar(bytes: Uint8Array, opts: { width?: number } = {}): ImportedArt {
@@ -93,5 +93,5 @@ export function parseAvatar(bytes: Uint8Array, opts: { width?: number } = {}): I
   const grid = CellGrid.filled(W, H, 32, 7, 0);
   rows.forEach((row, ry) => row.forEach((cell, rx) => { if (cell) grid.set(rx, ry, cell); }));
   grid.present.fill(CH_ALL);
-  return { grid, sauce: found?.sauce ?? null, iceColors: false, letterSpacing9px: false, fontName: found?.sauce.fontName || "IBM VGA" };
+  return { grid, sauce: found?.sauce ?? null, iceColors: false, letterSpacing9px: false, aspectRatio: aspectFromFlags(found?.sauce.flags ?? 0), fontName: found?.sauce.fontName || "IBM VGA" };
 }

@@ -1,4 +1,4 @@
-import { type Layer, type Raster, type Rect, createRaster, hasBlink, layerSize, renderGrid } from "@killerdraw/core";
+import { aspectStretch, type Layer, type Raster, type Rect, createRaster, hasBlink, layerSize, renderGrid } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 import { type Pointer, type Tool, pickUp } from "./tools.js";
 
@@ -13,7 +13,7 @@ export class CanvasView {
   private image!: ImageData;
   private hover: Pointer | null = null;
   private pressed = -1;
-  private outline: { version: number; zoom: number; path: Path2D } | null = null;
+  private outline: { version: number; zoom: number; cellH: number; path: Path2D } | null = null;
   /** with iCE off, cells with a bright background blink, as they will in a viewer */
   private blinkTimer = 0;
   private blinkOff = false;
@@ -82,6 +82,17 @@ export class CanvasView {
     return true;
   }
 
+  /**
+   * How much taller than wide a document pixel is drawn. Art made for a 4:3
+   * CRT is squat on square pixels until it is stretched back out; SAUCE says
+   * which was meant. Only the *drawing* stretches — a cell is still a cell, so
+   * the grid, the tools and the exported characters are untouched.
+   */
+  private get ys(): number {
+    const doc = this.ed.doc;
+    return doc.aspectRatio === "stretch" ? aspectStretch(doc.letterSpacing9px) : 1;
+  }
+
   /** the full-resolution rendering of the document, for the preview to scale down */
   get artCanvas(): HTMLCanvasElement {
     return this.art;
@@ -89,12 +100,12 @@ export class CanvasView {
 
   /** the part of the document on screen, in document pixels */
   viewport(): { x: number; y: number; width: number; height: number } {
-    const z = this.ed.zoom, pad = 24, r = this.root;
-    const x = Math.max(0, (r.scrollLeft - pad) / z), y = Math.max(0, (r.scrollTop - pad) / z);
+    const z = this.ed.zoom, zy = z * this.ys, pad = 24, r = this.root;
+    const x = Math.max(0, (r.scrollLeft - pad) / z), y = Math.max(0, (r.scrollTop - pad) / zy);
     return {
       x, y,
       width: Math.min(this.raster.width - x, (r.clientWidth - Math.max(0, pad - r.scrollLeft)) / z),
-      height: Math.min(this.raster.height - y, (r.clientHeight - Math.max(0, pad - r.scrollTop)) / z),
+      height: Math.min(this.raster.height - y, (r.clientHeight - Math.max(0, pad - r.scrollTop)) / zy),
     };
   }
 
@@ -102,10 +113,10 @@ export class CanvasView {
   cellAt(clientX: number, clientY: number): { x: number; y: number } | null {
     const wrap = this.root.getBoundingClientRect();
     if (clientX < wrap.left || clientX > wrap.right || clientY < wrap.top || clientY > wrap.bottom) return null;
-    const r = this.overlay.getBoundingClientRect(), z = this.ed.zoom;
+    const r = this.overlay.getBoundingClientRect(), z = this.ed.zoom, zy = z * this.ys;
     return {
       x: Math.max(0, Math.min(this.ed.doc.width - 1, Math.floor((clientX - r.left) / z / this.raster.cellWidth))),
-      y: Math.max(0, Math.min(this.ed.doc.height - 1, Math.floor((clientY - r.top) / z / this.raster.cellHeight))),
+      y: Math.max(0, Math.min(this.ed.doc.height - 1, Math.floor((clientY - r.top) / zy / this.raster.cellHeight))),
     };
   }
 
@@ -113,7 +124,7 @@ export class CanvasView {
   centerOn(px: number, py: number): void {
     const z = this.ed.zoom, r = this.root;
     r.scrollLeft = px * z + 24 - r.clientWidth / 2;
-    r.scrollTop = py * z + 24 - r.clientHeight / 2;
+    r.scrollTop = py * z * this.ys + 24 - r.clientHeight / 2;
   }
 
   get hoverCell(): Pointer | null {
@@ -122,7 +133,7 @@ export class CanvasView {
 
   private pointer(e: PointerEvent, button: number): Pointer {
     const r = this.overlay.getBoundingClientRect();
-    const px = (e.clientX - r.left) / this.ed.zoom, py = (e.clientY - r.top) / this.ed.zoom;
+    const px = (e.clientX - r.left) / this.ed.zoom, py = (e.clientY - r.top) / (this.ed.zoom * this.ys);
     const ch = this.raster.cellHeight;
     return {
       x: Math.floor(px / this.raster.cellWidth), y: Math.floor(py / ch),
@@ -143,7 +154,7 @@ export class CanvasView {
       if (this.fitZoom()) this.ed.emit("ui");
     }
     const zoom = this.ed.zoom;
-    const w = Math.round(this.raster.width * zoom), hgt = Math.round(this.raster.height * zoom);
+    const w = Math.round(this.raster.width * zoom), hgt = Math.round(this.raster.height * zoom * this.ys);
     const css = { w: `${w}px`, h: `${hgt}px` };
     if (this.art.style.width !== css.w || this.art.style.height !== css.h) {
       for (const c of [this.art, this.refs, this.overlay]) { c.style.width = css.w; c.style.height = css.h; }
@@ -177,7 +188,7 @@ export class CanvasView {
   drawRefs(): void {
     const ctx = this.refs.getContext("2d")!;
     ctx.clearRect(0, 0, this.refs.width, this.refs.height);
-    const z = this.ed.zoom, cw = this.raster.cellWidth * z, ch = this.raster.cellHeight * z;
+    const z = this.ed.zoom, cw = this.raster.cellWidth * z, ch = this.raster.cellHeight * z * this.ys;
     const walk = (layers: Layer[]): void => {
       for (const l of layers) {
         if (!l.visible) continue;
@@ -202,7 +213,7 @@ export class CanvasView {
 
   drawOverlay(): void {
     const ctx = this.overlay.getContext("2d")!;
-    const z = this.ed.zoom, cw = this.raster.cellWidth * z, ch = this.raster.cellHeight * z;
+    const z = this.ed.zoom, cw = this.raster.cellWidth * z, ch = this.raster.cellHeight * z * this.ys;
     ctx.clearRect(0, 0, this.overlay.width, this.overlay.height);
 
     const l = this.ed.active;
@@ -243,7 +254,7 @@ export class CanvasView {
     const sel = this.ed.selection;
     if (sel) {
       // the border between selected and unselected cells, rebuilt only when the selection changes
-      if (!this.outline || this.outline.version !== this.ed.selectionVersion || this.outline.zoom !== z) {
+      if (!this.outline || this.outline.version !== this.ed.selectionVersion || this.outline.zoom !== z || this.outline.cellH !== ch) {
         const path = new Path2D(), W = sel.width, H = sel.height, m = sel.mask;
         for (let y = 0; y < H; y++) {
           for (let x = 0; x < W; x++) {
@@ -255,7 +266,7 @@ export class CanvasView {
             if (x === W - 1 || !m[y * W + x + 1]) { path.moveTo(px + cw - 0.5, py); path.lineTo(px + cw - 0.5, py + ch); }
           }
         }
-        this.outline = { version: this.ed.selectionVersion, zoom: z, path };
+        this.outline = { version: this.ed.selectionVersion, zoom: z, cellH: ch, path };
       }
       ctx.lineWidth = 1;
       ctx.strokeStyle = "#000";

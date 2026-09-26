@@ -1,12 +1,13 @@
 import {
-  ART_EXTENSIONS, CP437_UNICODE, type CellsLayer, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
+  ART_EXTENSIONS, type AspectRatio, aspectStretch, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, STANDARD_FONTS, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
   deviceShiftPx, documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
-  renderDepthView, renderGrid, saveProject,
+  renderDepthView, renderGrid, saveProject, standardFont, stretchRows,
 } from "@killerdraw/core";
 import fontUrl from "../../core/assets/ibmstd.f16?url";
 import welcomeUrl from "../assets/monke.jock?url";
 import { Editor } from "./editor.js";
 import { FontLibrary } from "./fonts.js";
+import { FontStore } from "./fontstore.js";
 import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
@@ -30,6 +31,7 @@ const isProject = (name: string): boolean => /\.(jock|kdraw)$/i.test(name);
 
 async function start(): Promise<void> {
   const font = parseRawFont(new Uint8Array(await (await fetch(fontUrl)).arrayBuffer()));
+  const fonts = new FontStore(font);
   const ed = new Editor(font);
   const io: FileIO = await fileIO();
   const lib = new FontLibrary();
@@ -161,8 +163,23 @@ async function start(): Promise<void> {
 
   const exportOpts = () => ({
     iceColors: ed.doc.iceColors, palette: ed.doc.palette, sauce: ed.doc.sauce,
-    fontName: ed.doc.fontName, letterSpacing9px: ed.doc.letterSpacing9px,
+    fontName: ed.doc.fontName, letterSpacing9px: ed.doc.letterSpacing9px, aspectRatio: ed.doc.aspectRatio,
   });
+
+  /**
+   * Follow the font the document asks for. Cheap to call on every change: it
+   * only fetches when the answer would differ from what is already drawn.
+   */
+  let fontKey = "";
+  const syncFont = async (force = false): Promise<void> => {
+    const key = FontStore.key(ed.doc);
+    if (key === fontKey && !force) return;
+    fontKey = key;
+    const { font: next, note } = await fonts.forDocument(ed.doc);
+    if (FontStore.key(ed.doc) !== key) return;   // the document moved on while we fetched
+    ed.setFont(next);
+    if (note) ed.setStatus(note);
+  };
 
   /** iCE changes how many background colours shadeans may use */
   const reconvertImages = (): void => {
@@ -175,7 +192,45 @@ async function start(): Promise<void> {
     liveProp(ed, ed.doc, "width", "Canvas width", ed.doc.width, { min: 1, max: 500, width: 54 }, (v) => v ?? ed.doc.width),
     "×", liveProp(ed, ed.doc, "height", "Canvas height", ed.doc.height, { min: 1, max: 5000, width: 60 }, (v) => v ?? ed.doc.height),
     h("label.check", { title: "iCE colours: 16 background colours instead of blink" },
-      h("input", { type: "checkbox", checked: ed.doc.iceColors, onchange: () => ed.setProps("iCE colours", ed.doc, { iceColors: !ed.doc.iceColors }, reconvertImages) }), "iCE"));
+      h("input", { type: "checkbox", checked: ed.doc.iceColors, onchange: () => ed.setProps("iCE colours", ed.doc, { iceColors: !ed.doc.iceColors }, reconvertImages) }), "iCE"),
+    h("label.check", { title: "9-pixel cells, as VGA text mode drew them: every cell is a pixel wider, and the 9th column repeats the 8th for the box-drawing and block characters (CP437 192-223) so ─── and ███ join up. Recorded in SAUCE." },
+      h("input", { type: "checkbox", checked: ed.doc.letterSpacing9px, onchange: () => ed.setProps("9px letter spacing", ed.doc, { letterSpacing9px: !ed.doc.letterSpacing9px }) }), "9px"));
+
+  /** The bitmap font: what the art is drawn in, and what SAUCE records. */
+  const fontPick = h("span.row");
+  const renderFont = (): void => {
+    const embedded = ed.doc.assets.has(EMBEDDED_FONT_ASSET);
+    const known = !!standardFont(ed.doc.fontName);
+    const select = h("select", {
+      title: "The bitmap font this art is drawn in, by the name SAUCE records",
+      disabled: embedded,
+      onchange: () => ed.setProps("Font", ed.doc, { fontName: select.value }),
+    });
+    for (const f of STANDARD_FONTS) select.append(h("option", { value: f.name, selected: f.name === ed.doc.fontName }, `${f.name} (8×${f.height})`));
+    // a name we cannot draw still belongs in the list: it is what the file asks for
+    if (!known && !embedded) select.prepend(h("option", { value: ed.doc.fontName, selected: true }, `${ed.doc.fontName} — not available`));
+    fontPick.replaceChildren(embedded
+      ? h("span.muted.font-embedded", { title: "This file carries its own font bitmap, which is what it is drawn in. Remove it to choose a standard font." }, "font: embedded")
+      : select);
+  };
+
+  /**
+   * The shape the art's pixels were meant to be. Art drawn for a 4:3 screen is
+   * squat on square pixels until it is stretched; SAUCE records which was meant.
+   */
+  const aspectPick = h("span.row");
+  const renderAspect = (): void => {
+    const select = h("select", {
+      title: "How the picture is shown, and what SAUCE records: art drawn for a 4:3 CRT needs stretching vertically to look the way it was drawn",
+      onchange: () => ed.setProps("Aspect ratio", ed.doc, { aspectRatio: select.value as AspectRatio }),
+    });
+    for (const [v, label, tip] of [
+      ["none", "as drawn", "No preference recorded: one cell, one pixel grid, no stretching"],
+      ["stretch", "4:3 CRT", "Drawn for a CRT: stretched vertically so it looks the way it did there"],
+      ["square", "square", "Drawn for square pixels: shown as it is, and SAUCE says so"],
+    ] as const) select.append(h("option", { value: v, selected: ed.doc.aspectRatio === v, title: tip }, label));
+    aspectPick.replaceChildren(select);
+  };
 
   const undoBtn = iconButton("undo", "Undo (Ctrl/Cmd+Z)", { onclick: () => ed.undo() });
   const redoBtn = iconButton("redo", "Redo (Ctrl/Cmd+Shift+Z)", { onclick: () => ed.redo() });
@@ -201,9 +256,11 @@ async function start(): Promise<void> {
   };
 
   const exportPng = (): void => {
-    const raster = createRaster(ed.doc.width, ed.doc.height, font, ed.doc.letterSpacing9px);
-    renderGrid(flat(), font, raster, { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px });
-    download(`${baseName()}.png`, encodePng(raster), "image/png");
+    const raster = createRaster(ed.doc.width, ed.doc.height, ed.font, ed.doc.letterSpacing9px);
+    renderGrid(flat(), ed.font, raster, { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px });
+    // art drawn for a 4:3 screen is exported the way it is shown, stretched back out
+    const out = ed.doc.aspectRatio === "stretch" ? stretchRows(raster, aspectStretch(ed.doc.letterSpacing9px)) : raster;
+    download(`${baseName()}.png`, encodePng(out), "image/png");
   };
   const export3d = (): void => {
     const comp = ed.comp, plan = planDepth(comp);
@@ -213,8 +270,8 @@ async function start(): Promise<void> {
   /** One eye's view of the depth layers, as the preview draws it: `eye` −1 … 1, at the device's full slider. */
   const depthFrame = (eye: number): ReturnType<typeof createRaster> => {
     const comp = ed.comp, plan = planDepth(comp);
-    const raster = createRaster(ed.doc.width, ed.doc.height, font, ed.doc.letterSpacing9px);
-    renderDepthView(comp, plan, font, raster, eye * deviceShiftPx(1e9), { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px });
+    const raster = createRaster(ed.doc.width, ed.doc.height, ed.font, ed.doc.letterSpacing9px);
+    renderDepthView(comp, plan, ed.font, raster, eye * deviceShiftPx(1e9), { palette: ed.doc.palette, iceColors: ed.doc.iceColors, letterSpacing9px: ed.doc.letterSpacing9px });
     return raster;
   };
   const flatDepths = (): boolean => planDepth(ed.comp).levels.every((d) => d === 0);
@@ -283,7 +340,7 @@ async function start(): Promise<void> {
     h("span.sep"), undoBtn, redoBtn, h("span.sep"),
     h("button.ib", { title: "Zoom out", "aria-label": "Zoom out", onclick: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)) }, "−"), zoom,
     h("button.ib", { title: "Zoom in", "aria-label": "Zoom in", onclick: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)) }, "+"),
-    h("span.sep"), size,
+    h("span.sep"), size, fontPick, aspectPick,
     iconButton("canvas", "Canvas size…", { tip: "add or remove rows / columns at any edge, including the top and left", onclick: canvasDialog }),
     iconButton("sauce", "SAUCE…", { tip: "title, author, group, comments, font", onclick: () => sauceDialog(ed) }),
     h("span.sep"), jointBtn, mirrorBtn,
@@ -340,9 +397,10 @@ async function start(): Promise<void> {
     h("main", {}, buildLeft(ed, tools, lib), view.root, buildRight(ed, view, lib)), status);
 
   ed.on("ui", () => { renderBar(); renderStatus(); });
-  ed.on("doc", () => { renderBar(); renderSize(); renderStatus(); });
+  ed.on("doc", () => { renderBar(); renderSize(); renderFont(); renderAspect(); renderStatus(); void syncFont(); });
   ed.on("status", renderStatus);
-  renderBar(); renderSize(); renderStatus();
+  renderBar(); renderSize(); renderFont(); renderAspect(); renderStatus();
+  await syncFont(true);
 
   // pasting text into a prose layer being edited (replaces the selection, if any)
   let lastTextCopy = "";

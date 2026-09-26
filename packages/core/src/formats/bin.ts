@@ -2,7 +2,8 @@ import { type Rgb, VGA_PALETTE, nearestIndex } from "../color.js";
 import { CH_ALL, CellGrid } from "../grid.js";
 import type { ImportedArt } from "./ansi.js";
 import {
-  SAUCE_DATATYPE_BINARYTEXT, SAUCE_FLAG_8PX, SAUCE_FLAG_9PX, SAUCE_FLAG_ICE,
+  SAUCE_DATATYPE_BINARYTEXT, SAUCE_FLAG_8PX, SAUCE_FLAG_9PX, SAUCE_FLAG_ICE, SAUCE_MASK_SPACING,
+  type AspectRatio, aspectFromFlags, aspectToFlags,
   type Sauce, encodeSauce, parseSauce,
 } from "./sauce.js";
 
@@ -47,7 +48,8 @@ export function parseBin(bytes: Uint8Array, opts: { width?: number } = {}): Impo
     grid: cellsFromPairs(bytes.subarray(0, end), width, height),
     sauce,
     iceColors: (flags & SAUCE_FLAG_ICE) !== 0,
-    letterSpacing9px: (flags & 6) === SAUCE_FLAG_9PX,
+    letterSpacing9px: (flags & SAUCE_MASK_SPACING) === SAUCE_FLAG_9PX,
+    aspectRatio: aspectFromFlags(flags),
     fontName: sauce?.fontName || "IBM VGA",
   };
 }
@@ -58,6 +60,7 @@ export interface BinExportOptions {
   sauce?: Sauce | false;
   fontName?: string;
   letterSpacing9px?: boolean;
+  aspectRatio?: AspectRatio;
 }
 
 export function encodeBin(grid: CellGrid, opts: BinExportOptions): Uint8Array {
@@ -70,7 +73,8 @@ export function encodeBin(grid: CellGrid, opts: BinExportOptions): Uint8Array {
     dataType: SAUCE_DATATYPE_BINARYTEXT,
     fileType: grid.width / 2,
     tinfo1: 0, tinfo2: 0, tinfo3: 0, tinfo4: 0,
-    flags: (opts.iceColors ? SAUCE_FLAG_ICE : 0) | (opts.letterSpacing9px ? SAUCE_FLAG_9PX : SAUCE_FLAG_8PX),
+    flags: (opts.iceColors ? SAUCE_FLAG_ICE : 0) | (opts.letterSpacing9px ? SAUCE_FLAG_9PX : SAUCE_FLAG_8PX)
+      | aspectToFlags(opts.aspectRatio ?? "none"),
     fontName: opts.fontName ?? "IBM VGA",
   });
   const file = new Uint8Array(data.length + tail.length);

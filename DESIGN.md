@@ -238,6 +238,19 @@ Order is flexible; everything here is in scope.
    Free transform (`transform.ts`, the Move tool / Cmd+T): one handle model for every layer type; cells content or the
    selected cells are lifted, scaled nearest-neighbour and put back as one undo step.
    3D pictures: animated PNG of the wiggle (`encodeApng`, verified against Pillow) and a red/cyan anaglyph PNG.
+   Fonts (`fontnames.ts`, app `fontstore.ts`): a document is drawn in the font SAUCE names, or in the bitmap the
+   file embeds (XBIN/ADF/IDF, kept at `assets/fonts/document.fnt`), which wins. The name table is generated from
+   Moebius's `lookup_url` switch and carries the 86 names whose files we actually ship — Moebius lists 66 more than
+   it has bitmaps for, so those would only fail to load. An unknown name is kept on the document (an export still
+   asks for it) and drawn in IBM VGA with a status note. `Editor.setFont` rebuilds the glyph classes, since half
+   blocks come from the bitmaps and a custom font may have none. Verified against 48,211 real SAUCE records from
+   the corpus in `ansi-llm/raw_ansi_art`: 99.3% resolve exactly, and everything unresolved is junk in the field
+   (tool names, artist handles, null bytes) rather than a font we lack.
+   9px letter spacing was already rendered correctly (`render.ts`: the 9th column repeats the 8th for CP437
+   192-223); it moved from inside the SAUCE dialog to a top-bar toggle beside iCE, which is where it was looked for.
+   Aspect ratio (SAUCE flags bits 3-4): "stretch" scales the *drawing* vertically by 1.2 at 8px cells or 1.35 at 9px
+   — what a 4:3 screen does to 640x400 and 720x400 — in the canvas (`view.ts` `ys`, which the hit-testing divides
+   back out) and in PNG export (`stretchRows`, nearest-neighbour so no colour is invented). The grid never changes.
    Cutting a background out (`matte.ts`, `cleanup.ts`, `halves.ts`): keying happens in the source pixels, before
    shadeans — a cell straddling a silhouette otherwise comes back as one character blending subject and background,
    which nothing afterwards can separate. Keyed pixels lose their alpha and take the nearest kept colour ("bleed"),

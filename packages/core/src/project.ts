@@ -121,7 +121,7 @@ export function saveProject(doc: KdDocument): Uint8Array {
   }
   files["preview.ans"] = encodeAnsi(composite(doc).grid, {
     iceColors: doc.iceColors, palette: doc.palette, sauce: doc.sauce,
-    fontName: doc.fontName, letterSpacing9px: doc.letterSpacing9px,
+    fontName: doc.fontName, letterSpacing9px: doc.letterSpacing9px, aspectRatio: doc.aspectRatio,
   });
   // manifest first, so it can be read without scanning the archive
   return zipSync({ "manifest.json": strToU8(JSON.stringify(manifest, null, 2)), ...files }, { level: 6 });
@@ -139,6 +139,8 @@ export function loadProject(bytes: Uint8Array): KdDocument {
   const assets = new Map<string, Uint8Array>();
   for (const [path, data] of Object.entries(files)) if (path.startsWith("assets/")) assets.set(path, data);
   return {
+    // projects written before a setting existed simply lack it
+    aspectRatio: "none",
     ...manifest.document,
     layers: (manifest.layers as LayerJson[]).map((l) => layerFromJson(l, files)),
     assets,

@@ -111,9 +111,24 @@ export class Editor {
 
   private listeners = new Map<EventName, Set<(arg?: unknown) => void>>();
 
-  constructor(readonly font: BitmapFont) {
+  constructor(public font: BitmapFont) {
     this.glyphs = glyphInfoFromFont(font);
     this.setDocument(this.doc, "untitled");
+  }
+
+  /**
+   * Draw in a different bitmap font. The glyph classes come from the bitmaps —
+   * a half block need not split down the middle, and a custom font may not have
+   * one at all — so they are rebuilt, and everything that was matched through
+   * them is composited again. Not undoable: it is how the document is shown,
+   * and it follows the document's font name, which is.
+   */
+  setFont(font: BitmapFont): void {
+    if (font === this.font) return;
+    this.font = font;
+    this.glyphs = glyphInfoFromFont(font);
+    this.recomposite();
+    this.emit("doc");
   }
 
   on(event: EventName, fn: (arg?: unknown) => void): void {

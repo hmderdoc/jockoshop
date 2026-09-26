@@ -68,3 +68,25 @@ export function renderGrid(grid: CellGrid, font: BitmapFont, raster: Raster, opt
     }
   }
 }
+
+/**
+ * A copy of `raster` scaled vertically by `factor`, for output only.
+ *
+ * Rows are repeated, never blended: ANSI art is 16 (or a few more) exact
+ * colours, and interpolating would invent colours between them and soften
+ * every block edge. Uneven row heights are the honest result of stretching a
+ * character grid by a fraction — 1.2 repeats every fifth row.
+ */
+export function stretchRows(raster: Raster, factor: number): Raster {
+  const height = Math.max(1, Math.round(raster.height * factor));
+  const stride = raster.width * 4;
+  const out: Raster = {
+    width: raster.width, height, data: new Uint8ClampedArray(stride * height),
+    cellWidth: raster.cellWidth, cellHeight: raster.cellHeight * factor,
+  };
+  for (let y = 0; y < height; y++) {
+    const src = Math.min(raster.height - 1, Math.floor(y / factor));
+    out.data.set(raster.data.subarray(src * stride, src * stride + stride), y * stride);
+  }
+  return out;
+}

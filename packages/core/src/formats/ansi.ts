@@ -2,13 +2,15 @@ import { type Color, type Rgb, VGA_PALETTE, isRgb, nearestIndex, rgb, toRgb } fr
 import { CH_ALL, CellGrid } from "../grid.js";
 import {
   SAUCE_DATATYPE_CHARACTER, SAUCE_FILETYPE_ANSI, SAUCE_FLAG_8PX, SAUCE_FLAG_9PX, SAUCE_FLAG_ICE,
-  type Sauce, type SauceRecord, encodeSauce, parseSauce,
+  SAUCE_MASK_SPACING, type AspectRatio, type Sauce, type SauceRecord, aspectFromFlags, aspectToFlags,
+  encodeSauce, parseSauce,
 } from "./sauce.js";
 
 export interface ImportedArt {
   grid: CellGrid;
   iceColors: boolean;
   letterSpacing9px: boolean;
+  aspectRatio: AspectRatio;
   fontName: string;
   sauce: SauceRecord | null;
   palette?: Rgb[];
@@ -180,7 +182,8 @@ export function parseAnsi(bytes: Uint8Array, opts: { width?: number } = {}): Imp
   return {
     grid, sauce,
     iceColors: (flags & SAUCE_FLAG_ICE) !== 0,
-    letterSpacing9px: (flags & 6) === SAUCE_FLAG_9PX,
+    letterSpacing9px: (flags & SAUCE_MASK_SPACING) === SAUCE_FLAG_9PX,
+    aspectRatio: aspectFromFlags(flags),
     fontName: sauce?.fontName || "IBM VGA",
     ...depth,
   };
@@ -193,6 +196,7 @@ export interface AnsiExportOptions {
   sauce?: Sauce | false;
   fontName?: string;
   letterSpacing9px?: boolean;
+  aspectRatio?: AspectRatio;
   /** CRLF after every row, for plain terminals that know nothing about SAUCE */
   forceNewlines?: boolean;
   /**
@@ -290,7 +294,8 @@ export function encodeAnsi(grid: CellGrid, opts: AnsiExportOptions): Uint8Array 
     dataType: SAUCE_DATATYPE_CHARACTER,
     fileType: SAUCE_FILETYPE_ANSI,
     tinfo1: W, tinfo2: H, tinfo3: 0, tinfo4: 0,
-    flags: (opts.iceColors ? SAUCE_FLAG_ICE : 0) | (opts.letterSpacing9px ? SAUCE_FLAG_9PX : SAUCE_FLAG_8PX),
+    flags: (opts.iceColors ? SAUCE_FLAG_ICE : 0) | (opts.letterSpacing9px ? SAUCE_FLAG_9PX : SAUCE_FLAG_8PX)
+      | aspectToFlags(opts.aspectRatio ?? "none"),
     fontName: opts.fontName ?? "IBM VGA",
   });
   const file = new Uint8Array(data.length + tail.length);

@@ -7,7 +7,7 @@
 import { type Color, type Rgb, VGA_PALETTE, rgb, toRgb } from "../color.js";
 import { CH_ALL, CellGrid } from "../grid.js";
 import type { ImportedArt } from "./ansi.js";
-import { parseSauce } from "./sauce.js";
+import { aspectFromFlags, parseSauce } from "./sauce.js";
 
 const ID = "TUNDRA24";
 
@@ -51,7 +51,7 @@ export function parseTundra(bytes: Uint8Array, opts: { width?: number } = {}): I
   const grid = CellGrid.filled(W, H, 32, 7, 0);
   rows.forEach((row, ry) => row.forEach((cell, rx) => { if (cell && rx < W) grid.set(rx, ry, cell); }));
   grid.present.fill(CH_ALL);
-  return { grid, sauce: found?.sauce ?? null, iceColors: true, letterSpacing9px: false, fontName: found?.sauce.fontName || "IBM VGA" };
+  return { grid, sauce: found?.sauce ?? null, iceColors: true, letterSpacing9px: false, aspectRatio: aspectFromFlags(found?.sauce.flags ?? 0), fontName: found?.sauce.fontName || "IBM VGA" };
 }
 
 /** Every cell gets exact colours; palette colours are written through the palette. Trailing blank cells are skipped. */

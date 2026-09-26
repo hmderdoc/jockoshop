@@ -1111,6 +1111,115 @@ await first.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
 check("the welcome piece is for the first launch only", await first.evaluate(() => window.kd?.ed.fileName) === "untitled");
 await firstProfile.close();
 
+// ===================================================== fonts, 9px cells, aspect ratio
+await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed);
+
+const artSize = () => kd(() => {
+  const a = document.querySelector("canvas.art");
+  return { w: a.width, h: a.height, cssH: a.style.height, fontH: window.kd.ed.font.height, rows: window.kd.ed.doc.height };
+});
+const topSelect = (which) => kd((w) => {
+  const sels = [...document.querySelectorAll(".topbar select")];
+  return sels[w] ? sels[w].value : null;
+}, which);
+
+const vgaBase = await artSize();
+check("a new document is drawn in IBM VGA, 16 rows to a cell", vgaBase.fontH === 16 && await topSelect(0) === "IBM VGA", JSON.stringify(vgaBase));
+
+// 9px letter spacing: the toggle lives beside iCE, and widens every cell
+const nineBox = await kd(() => {
+  const l = [...document.querySelectorAll(".topbar label.check")].find((x) => x.textContent.includes("9px"));
+  if (!l) return false;
+  l.querySelector("input").click();
+  return true;
+});
+check("the 9px toggle is in the top bar, beside iCE", nineBox);
+await settle();
+const nine = await artSize();
+check("9px makes every cell a pixel wider", nine.w === vgaBase.w / 8 * 9 && await kd(() => window.kd.ed.doc.letterSpacing9px), `${vgaBase.w} -> ${nine.w}`);
+// the rule that makes box drawing join: the 9th column repeats the 8th, but only for CP437 192-223
+const ninePixels = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const ed = window.kd.ed;
+  const g = core.CellGrid.filled(3, 1, 32, 15, 0);
+  g.set(0, 0, { glyph: 205, fg: 15, bg: 0 });   // = double line, in the extend range
+  g.set(1, 0, { glyph: 219, fg: 15, bg: 0 });   // block, in the range
+  g.set(2, 0, { glyph: 65, fg: 15, bg: 0 });    // A, not in the range
+  const r = core.createRaster(3, 1, ed.font, true);
+  core.renderGrid(g, ed.font, r, { palette: ed.doc.palette, iceColors: true, letterSpacing9px: true });
+  const col9 = (cx, y) => r.data[((y * r.width) + cx * 9 + 8) * 4] > 128;
+  let dashRow = -1;
+  for (let y = 0; y < r.cellHeight; y++) if (r.data[((y * r.width) + 0 * 9 + 3) * 4] > 128) { dashRow = y; break; }
+  return { cellWidth: r.cellWidth, dashJoins: dashRow >= 0 && col9(0, dashRow), blockJoins: col9(1, 8), letterDoesNot: !col9(2, 8) };
+});
+check("9px: box drawing and blocks bridge the 9th column, letters do not",
+  ninePixels.cellWidth === 9 && ninePixels.dashJoins && ninePixels.blockJoins && ninePixels.letterDoesNot, JSON.stringify(ninePixels));
+await kd(() => [...document.querySelectorAll(".topbar label.check")].find((x) => x.textContent.includes("9px")).querySelector("input").click());
+await settle();
+
+// picking a font by its SAUCE name loads a different bitmap, with its own cell height
+await kd(() => { const s = [...document.querySelectorAll(".topbar select")][0]; s.value = "IBM VGA50"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await page.waitForFunction(() => window.kd.ed.font.height === 8, { timeout: 5000 }).catch(() => {});
+const halfHeight = await artSize();
+check("choosing IBM VGA50 loads an 8-row font and redraws at that size", halfHeight.fontH === 8 && halfHeight.h === vgaBase.h / 2, JSON.stringify(halfHeight));
+check("the document records the font it is drawn in, for SAUCE", await kd(() => window.kd.ed.doc.fontName) === "IBM VGA50");
+await kd(() => { const s = [...document.querySelectorAll(".topbar select")][0]; s.value = "Amiga Topaz 2+"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await page.waitForFunction(() => window.kd.ed.doc.fontName === "Amiga Topaz 2+", { timeout: 5000 }).catch(() => {});
+await settle();
+check("an Amiga font loads too", await kd(() => window.kd.ed.font.height) === 16 && await topSelect(0) === "Amiga Topaz 2+");
+
+// a name nothing can serve — real files carry tool names in this field
+await kd(() => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName: "SAUCE-ADDER V1.3" }); });
+await settle();
+const junk = await kd(() => ({ kept: window.kd.ed.doc.fontName, height: window.kd.ed.font.height, status: window.kd.ed.status }));
+check("an unknown font name is kept (so exports still ask for it) and drawn in IBM VGA, with a note",
+  junk.kept === "SAUCE-ADDER V1.3" && junk.height === 16 && /not a font jockoshop has/.test(junk.status), JSON.stringify(junk));
+
+// art that carries its own font bitmap: XBIN, and the embedded one wins
+const embedded = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const g = core.CellGrid.filled(4, 2, 65, 7, 0);
+  // a font of the right shape but 8 rows to a cell, so it is recognisable by height
+  const fontBytes = Uint8Array.from({ length: 256 * 8 }, (_, i) => (i % 8 < 4 ? 0xff : 0x00));
+  const bytes = core.encodeXbin(g, { fontBytes });
+  window.kd.ed.setDocument(core.documentFromArt(core.parseArt(bytes, "custom.xb")), "custom.xb");
+  return true;
+});
+await page.waitForFunction(() => window.kd.ed.font.height === 8, { timeout: 5000 }).catch(() => {});
+const emb = await kd(() => ({
+  height: window.kd.ed.font.height,
+  asset: window.kd.ed.doc.assets.has("assets/fonts/document.fnt"),
+  picker: [...document.querySelectorAll(".topbar select")].length,
+  label: document.querySelector(".topbar .font-embedded")?.textContent ?? "",
+}));
+check("an XBIN's own font bitmap is what its art is drawn in", embedded && emb.height === 8 && emb.asset, JSON.stringify(emb));
+check("the font picker gives way to it, since the file carries the font", emb.label.includes("embedded"), emb.label);
+
+// aspect ratio: art drawn for a 4:3 screen is stretched to look as it did
+await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed);
+const flatAr = await artSize();
+await kd(() => { const s = [...document.querySelectorAll(".topbar select")][1]; s.value = "stretch"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await settle();
+const tallAr = await artSize();
+check("4:3 aspect stretches the drawing by 1.2 at 8-pixel cells",
+  Math.abs(parseFloat(tallAr.cssH) / parseFloat(flatAr.cssH) - 1.2) < 0.02, `${flatAr.cssH} -> ${tallAr.cssH}`);
+check("stretching changes how it is drawn, not the grid: same rows, same backing raster",
+  tallAr.rows === flatAr.rows && tallAr.h === flatAr.h, `${JSON.stringify(flatAr)} -> ${JSON.stringify(tallAr)}`);
+const arHit = await kd(() => {
+  // the cell under a point has to follow the stretch, or the brush lands in the wrong row
+  const view = window.kd.view ?? null;
+  const a = document.querySelector("canvas.art").getBoundingClientRect();
+  const z = window.kd.ed.zoom;
+  return { cell: window.kd.ed.doc.height, y: a.height / (16 * z) };
+});
+check("a stretched canvas still holds exactly the document's rows", Math.abs(arHit.y * 1 - arHit.cell * 1.2) < 0.5, JSON.stringify(arHit));
+await kd(() => { const s = [...document.querySelectorAll(".topbar select")][1]; s.value = "square"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await settle();
+check("SAUCE records the choice", await kd(() => window.kd.ed.doc.aspectRatio) === "square");
+await shot("21-fonts-aspect");
+
 check("no console errors or page errors", problems.length === 0, problems.slice(0, 3).join(" ; "));
 
 await browser.close();

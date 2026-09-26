@@ -1,4 +1,5 @@
 import { type KdDocument, createCellsLayer, createDocument } from "./document.js";
+import { EMBEDDED_FONT_ASSET } from "./fontnames.js";
 import { type ImportedArt, parseAnsi } from "./formats/ansi.js";
 import { parseBin } from "./formats/bin.js";
 import { parseXbin } from "./formats/xbin.js";
@@ -51,9 +52,10 @@ function flatDocument(art: ImportedArt, layerName: string): KdDocument {
   const doc = createDocument(art.grid.width, art.grid.height);
   doc.iceColors = art.iceColors;
   doc.letterSpacing9px = art.letterSpacing9px;
+  doc.aspectRatio = art.aspectRatio;
   doc.fontName = art.fontName;
   if (art.palette) doc.palette = art.palette;
-  if (art.fontBytes) doc.assets.set("assets/fonts/document.fnt", art.fontBytes);
+  if (art.fontBytes) doc.assets.set(EMBEDDED_FONT_ASSET, art.fontBytes);
   if (art.sauce) {
     const { title, author, group, date, comments } = art.sauce;
     doc.sauce = { title, author, group, date, comments };

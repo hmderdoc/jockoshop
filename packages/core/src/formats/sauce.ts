@@ -25,7 +25,36 @@ export interface SauceRecord extends Sauce {
 
 export const SAUCE_DATATYPE_CHARACTER = 1, SAUCE_DATATYPE_BINARYTEXT = 5, SAUCE_DATATYPE_XBIN = 6;
 export const SAUCE_FILETYPE_ANSI = 1;
+/**
+ * The ANSiFlags byte (offset 105). Bit 0 is non-blink (iCE); bits 1-2 are the
+ * letter spacing the art wants; bits 3-4 are the shape its pixels were meant
+ * to be. 00 in a pair means "no preference", 11 is not valid.
+ */
 export const SAUCE_FLAG_ICE = 1, SAUCE_FLAG_8PX = 2, SAUCE_FLAG_9PX = 4;
+export const SAUCE_MASK_SPACING = 6;
+export const SAUCE_FLAG_AR_STRETCH = 8, SAUCE_FLAG_AR_SQUARE = 16, SAUCE_MASK_AR = 24;
+
+/** How the art's pixels were meant to be shaped. */
+export type AspectRatio = "none" | "stretch" | "square";
+
+export function aspectFromFlags(flags: number): AspectRatio {
+  const ar = flags & SAUCE_MASK_AR;
+  return ar === SAUCE_FLAG_AR_STRETCH ? "stretch" : ar === SAUCE_FLAG_AR_SQUARE ? "square" : "none";
+}
+
+export function aspectToFlags(aspect: AspectRatio): number {
+  return aspect === "stretch" ? SAUCE_FLAG_AR_STRETCH : aspect === "square" ? SAUCE_FLAG_AR_SQUARE : 0;
+}
+
+/**
+ * How much taller than wide a pixel has to be drawn for art meant for a 4:3
+ * screen. VGA text mode puts 80x25 cells on a 4:3 display: with 8-pixel cells
+ * that is 640x400, which has to become 640x480 to fill 4:3, so 1.2; with
+ * 9-pixel cells it is 720x400 becoming 720x540, so 1.35.
+ */
+export function aspectStretch(ninePx: boolean): number {
+  return ninePx ? 1.35 : 1.2;
+}
 
 const RECORD = 128, COMMENT_LINE = 64;
 
