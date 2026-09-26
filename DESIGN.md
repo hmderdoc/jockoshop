@@ -246,6 +246,13 @@ Order is flexible; everything here is in scope.
    blocks come from the bitmaps and a custom font may have none. Verified against 48,211 real SAUCE records from
    the corpus in `ansi-llm/raw_ansi_art`: 99.3% resolve exactly, and everything unresolved is junk in the field
    (tool names, artist handles, null bytes) rather than a font we lack.
+   Keyboard (`app/keymap.ts` + the table in `main.ts`): shortcuts are data, and the sheet under `?` is generated
+   from the same table, so it cannot drift from what the keys do. `mod` is Cmd on a Mac and Ctrl elsewhere; Moebius
+   also uses bare Ctrl for colours and character sets, which off a Mac is the same physical key as `mod`, so a Ctrl
+   press offers `ctrl+…` before `mod+…` and Ctrl+1 stays a foreground colour there as it is in Moebius (zoom keeps
+   `mod+alt+0` for the same reason). Colour toggling is ported from Moebius's `palette.js` exactly, including the
+   bit that makes it usable without looking: changing hue while bright stays bright. Bindings taken from
+   `app/menu.js` and `app/document/input/keyboard.js` of the vendored 1.0.29 checkout, not from memory.
    The character grid sizes itself from `font.height` — a cell is 8 wide but 8, 14, 16 or 19 rows tall, and a
    picker canvas fixed at 16 rows paints a shorter font's glyphs into its top half while the clicks are still
    computed against the whole element. Measured before the fix: 240 of 256 squares picked the wrong character in an

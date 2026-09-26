@@ -12,17 +12,18 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
-import { confirmUnsaved, sauceDialog, wiggleDialog } from "./dialogs.js";
+import { confirmUnsaved, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
 import { JointClient } from "./joint.js";
 import { jointDialog, jointPanel } from "./jointui.js";
 import { pickBitmapFont } from "./fontpicker.js";
+import { type Binding, indexBindings, lookup } from "./keymap.js";
 import { buildLeft } from "./left.js";
 import { buildRight } from "./right.js";
 import { liveProp, setBrushSize } from "./sections.js";
 import { importImage, scheduleImageRefresh } from "./shadeans.js";
 import { copySelection, cutSelection, deleteSelection, paste, selectAll, selectInverse, selectNone } from "./selectionops.js";
-import { createSelectTools, createTools } from "./tools.js";
-import { download, field, glyphLabel, h } from "./ui.js";
+import { createSelectTools, createTools, pickUp } from "./tools.js";
+import { colorName, download, field, glyphLabel, h } from "./ui.js";
 import { CanvasView } from "./view.js";
 
 const ART = ART_EXTENSIONS;
@@ -381,10 +382,19 @@ async function start(): Promise<void> {
     ed.emit("ui");
     ed.setStatus(`Brush character: ${glyphLabel(code)} (F${slot + 1} of set ${ed.charset + 1}, ${CHARSET_NAMES[ed.charset]})`);
   };
-  const cycleCharset = (dir: 1 | -1): void => {
-    ed.charset = (ed.charset + dir + CHARSETS.length) % CHARSETS.length;
+  const announceCharset = (): void => {
     ed.setStatus(`Character set ${ed.charset + 1}/${CHARSETS.length}: ${CHARSET_NAMES[ed.charset]}`);
     ed.emit("ui");
+  };
+  const cycleCharset = (dir: 1 | -1): void => {
+    ed.charset = (ed.charset + dir + CHARSETS.length) % CHARSETS.length;
+    announceCharset();
+  };
+  /** Moebius's Alt+F1..F10 (and Alt+Shift for the second ten): straight to a set. */
+  const chooseCharset = (n: number): void => {
+    if (n < 0 || n >= CHARSETS.length) { ed.setStatus(`There are ${CHARSETS.length} character sets.`); return; }
+    ed.charset = n;
+    announceCharset();
   };
   /** The F-key bar shown in the footer while the Type tool is active: [F11 ◄] F1░ … F10· [F12 ►] 6/16 */
   const charsetBar = (): HTMLElement => {
@@ -438,60 +448,124 @@ async function start(): Promise<void> {
     e.preventDefault();
     ed.prose.insert(text);
   });
+  /**
+   * Every shortcut, as data. The sheet under "?" is generated from this table,
+   * so it cannot drift from what the keys do.
+   *
+   * `moebius: true` marks the ones that are Moebius's own key, which is the
+   * point: an artist who draws with keys already has those in their fingers.
+   * Where the two disagreed, Moebius wins for anything used while drawing —
+   * Cmd+D is Default Colour here, not Deselect (Escape still deselects), and
+   * Cmd+E is iCE colours, not Export.
+   */
+  const editingProse = (): boolean => !!ed.prose.layer && ed.tool === "text";
+  const bindings: Binding[] = [
+    // --- file
+    { combo: "mod+n", label: "New document", group: "File", run: () => void newDocument() },
+    { combo: "mod+o", label: "Open…", group: "File", run: () => void openFile() },
+    { combo: "mod+s", label: "Save", group: "File", run: () => void saveProjectFile(false) },
+    { combo: "mod+shift+s", label: "Save As…", group: "File", run: () => void saveProjectFile(true) },
+    { combo: "mod+j", label: "Joint (collaborate)…", group: "File", run: () => openJoint() },
+    { combo: "mod+i", label: "SAUCE info…", group: "File", moebius: true, run: () => sauceDialog(ed) },
+    { combo: "mod+alt+c", label: "Canvas size…", group: "File", moebius: true, run: () => canvasDialog() },
+
+    // --- edit
+    { combo: "mod+z", label: "Undo", group: "Edit", moebius: true, run: () => ed.undo() },
+    { combo: ["mod+shift+z", "mod+y"], label: "Redo", group: "Edit", moebius: true, run: () => ed.redo() },
+    { combo: "mod+x", label: "Cut", group: "Edit", moebius: true, run: () => { if (!cutProseText("x")) cutSelection(ed); } },
+    { combo: "mod+c", label: "Copy", group: "Edit", moebius: true, run: () => { if (!cutProseText("c")) void copySelection(ed, false); } },
+    { combo: "mod+shift+c", label: "Copy merged", group: "Edit", run: () => void copySelection(ed, true) },
+    { combo: "mod+v", label: "Paste as layer", group: "Edit", moebius: true, when: () => !editingProse(), run: () => paste(ed) },
+    { combo: ["delete", "backspace"], label: "Delete selection", group: "Edit", when: () => !!ed.selection, run: () => deleteSelection(ed) },
+    { combo: "mod+t", label: "Free transform", group: "Edit", run: () => {
+      if (ed.chooseTool("move")) ed.setStatus(ed.selection ? "Free transform: drag a handle to scale the selected cells, inside to move them." : "Free transform: drag a handle to scale, inside to move.");
+    } },
+    { combo: ["mod+alt+m", "x"], label: "Mirror mode (left/right)", group: "Edit", moebius: true, run: () => toggleMirror("x") },
+    { combo: "shift+x", label: "Mirror mode (top/bottom)", group: "Edit", run: () => toggleMirror("y") },
+
+    // --- selection
+    { combo: "mod+a", label: "Select all", group: "Select", moebius: true, run: () => { if (editingProse()) ed.prose.selectAll(); else selectAll(ed); } },
+    { combo: "escape", label: "Deselect", group: "Select", when: () => !!ed.selection, run: () => selectNone(ed) },
+    { combo: "mod+shift+i", label: "Invert selection", group: "Select", run: () => selectInverse(ed) },
+
+    // --- colour: the heart of drawing with keys, all of it Moebius's
+    ...Array.from({ length: 8 }, (_, n): Binding => ({
+      combo: `ctrl+${n}`, label: n === 0 ? "Foreground colour (again for bright)" : "", group: "Colour", moebius: true, run: () => ed.toggleFg(n),
+    })),
+    ...Array.from({ length: 8 }, (_, n): Binding => ({
+      combo: `alt+${n}`, label: n === 0 ? "Background colour (again for bright)" : "", group: "Colour", moebius: true, run: () => ed.toggleBg(n),
+    })),
+    { combo: "ctrl+arrowup", label: "Previous foreground colour", group: "Colour", moebius: true, run: () => ed.stepFg(-1) },
+    { combo: "ctrl+arrowdown", label: "Next foreground colour", group: "Colour", moebius: true, run: () => ed.stepFg(1) },
+    { combo: "ctrl+arrowleft", label: "Previous background colour", group: "Colour", moebius: true, run: () => ed.stepBg(-1) },
+    { combo: "ctrl+arrowright", label: "Next background colour", group: "Colour", moebius: true, run: () => ed.stepBg(1) },
+    { combo: "mod+d", label: "Default colour (grey on black)", group: "Colour", moebius: true, run: () => ed.defaultColors() },
+    { combo: "mod+shift+x", label: "Swap foreground / background", group: "Colour", moebius: true, run: () => ed.swapColors() },
+    { combo: "alt+u", label: "Take the colours under the cursor", group: "Colour", moebius: true, run: () => {
+      const p = view.hoverCell;
+      if (p) { pickUp(ed, p.x, p.y); ed.setStatus(`Brush: ${glyphLabel(ed.glyph)} ${colorName(ed.fg)} on ${colorName(ed.bg)}`); }
+      else ed.setStatus("Point at a cell to take its colours.");
+    } },
+
+    // --- characters
+    ...Array.from({ length: 10 }, (_, n): Binding => ({
+      combo: `f${n + 1}`, label: n === 0 ? "Type character 1–10 of the set" : "", group: "Characters", moebius: true, run: () => typeSetGlyph(n),
+    })),
+    ...Array.from({ length: 10 }, (_, n): Binding => ({
+      combo: `alt+f${n + 1}`, label: n === 0 ? "Character set 1–10" : "", group: "Characters", moebius: true, run: () => chooseCharset(n),
+    })),
+    ...Array.from({ length: 10 }, (_, n): Binding => ({
+      combo: `alt+shift+f${n + 1}`, label: n === 0 ? "Character set 11–20" : "", group: "Characters", moebius: true, run: () => chooseCharset(n + 10),
+    })),
+    { combo: ["ctrl+,", "f11"], label: "Previous character set", group: "Characters", moebius: true, run: () => cycleCharset(-1) },
+    { combo: ["ctrl+.", "f12"], label: "Next character set", group: "Characters", moebius: true, run: () => cycleCharset(1) },
+    { combo: "ctrl+/", label: "First character set", group: "Characters", moebius: true, run: () => chooseCharset(0) },
+
+    // --- brush
+    { combo: ["alt+=", "alt++", "]"], label: "Larger brush", group: "Brush", moebius: true, run: () => setBrushSize(ed, ed.brushSize + 1) },
+    { combo: ["alt+-", "["], label: "Smaller brush", group: "Brush", moebius: true, run: () => setBrushSize(ed, ed.brushSize - 1) },
+    { combo: "h", label: "Half-block brush", group: "Brush", run: () => { ed.brushMode = "half"; ed.chooseTool("brush"); } },
+    { combo: "b", label: "Character brush", group: "Brush", moebius: true, run: () => { ed.brushMode = "char"; ed.chooseTool("brush"); } },
+
+    // --- view and document flags
+    { combo: ["mod+=", "mod++"], label: "Zoom in", group: "View", moebius: true, run: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)) },
+    { combo: "mod+-", label: "Zoom out", group: "View", moebius: true, run: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)) },
+    { combo: ["mod+0", "mod+alt+0"], label: "Zoom to fit", group: "View", run: () => setZoomFit(true) },
+    { combo: "mod+e", label: "iCE colours on/off", group: "View", moebius: true, run: () => ed.setProps("iCE colours", ed.doc, { iceColors: !ed.doc.iceColors }, reconvertImages) },
+    { combo: "mod+f", label: "9px letter spacing on/off", group: "View", moebius: true, run: () => ed.setProps("9px letter spacing", ed.doc, { letterSpacing9px: !ed.doc.letterSpacing9px }) },
+    { combo: ["?", "shift+/"], label: "This list", group: "View", run: () => shortcutSheet(bindings) },
+  ];
+  const keyIndex = indexBindings(bindings);
+
+  /** Cut or copy prose text while a prose layer is being typed in; false if that is not what is happening. */
+  function cutProseText(which: "c" | "x"): boolean {
+    if (!editingProse()) return false;
+    const text = ed.prose.selectedText();
+    if (!text) return true;   // nothing selected, but still a prose edit: do not fall through to the cells clipboard
+    lastTextCopy = text;
+    navigator.clipboard?.writeText(text).catch(() => { /* no clipboard access: the in-app copy still pastes */ });
+    if (which === "x") ed.prose.deleteSelection();
+    ed.setStatus(`${which === "x" ? "Cut" : "Copied"} ${text.length} characters.`);
+    return true;
+  }
+
   window.addEventListener("keydown", (e) => {
     const typing = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement;
-    const mod = e.metaKey || e.ctrlKey;
-    if (mod && e.key.toLowerCase() === "z") { if (typing) return; e.preventDefault(); if (e.shiftKey) ed.redo(); else ed.undo(); return; }
-    if (mod && e.key.toLowerCase() === "y") { if (typing) return; e.preventDefault(); ed.redo(); return; }
-    if (mod && e.key.toLowerCase() === "s") { e.preventDefault(); void saveProjectFile(e.shiftKey); return; }
-    if (mod && e.key.toLowerCase() === "o") { e.preventDefault(); void openFile(); return; }
-    if (mod && e.key === "0") { e.preventDefault(); setZoomFit(true); return; }
-    if (mod && (e.key === "=" || e.key === "+")) { e.preventDefault(); setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)); return; }
-    if (mod && e.key === "-") { e.preventDefault(); setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)); return; }
-    if (mod && e.key.toLowerCase() === "n" && !e.shiftKey) { e.preventDefault(); void newDocument(); return; }
-    if (mod && e.key.toLowerCase() === "j") { e.preventDefault(); openJoint(); return; }
-    if (typing) return;
-    if (currentTool().keydown?.(e)) { e.preventDefault(); return; }
-    const k = e.key.toLowerCase();
-    if (e.ctrlKey && (e.key === "," || e.key === ".")) { e.preventDefault(); cycleCharset(e.key === "," ? -1 : 1); return; }   // Moebius's set keys
-    const editingProse = ed.prose.layer && ed.tool === "text";
-    if (editingProse && mod && k === "a") { e.preventDefault(); ed.prose.selectAll(); return; }
-    if (editingProse && mod && (k === "c" || k === "x")) {
-      const text = ed.prose.selectedText();
-      if (!text) return;
-      e.preventDefault();
-      lastTextCopy = text;
-      navigator.clipboard?.writeText(text).catch(() => { /* no clipboard access: the in-app copy still pastes */ });
-      if (k === "x") ed.prose.deleteSelection();
-      ed.setStatus(`${k === "x" ? "Cut" : "Copied"} ${text.length} characters.`);
+    // a few work even in a text field, because they are about the document, not the text
+    if (typing && !(e.metaKey || e.ctrlKey)) return;
+    if (typing && !/^(z|y|s|o|n|j)$/i.test(e.key)) return;
+    if (!typing && currentTool().keydown?.(e)) { e.preventDefault(); return; }
+    const hit = lookup(keyIndex, e);
+    if (hit) {
+      if (!hit.passive) e.preventDefault();
+      hit.run(e);
       return;
     }
-    if (mod && k === "a") { e.preventDefault(); selectAll(ed); return; }
-    if (mod && k === "d") { e.preventDefault(); selectNone(ed); return; }
-    if (mod && k === "t") {   // free transform is what Move does
-      e.preventDefault();
-      if (ed.chooseTool("move")) ed.setStatus(ed.selection ? "Free transform: drag a handle to scale the selected cells, inside to move them." : "Free transform: drag a handle to scale, inside to move.");
-      return;
-    }
-    if (mod && e.shiftKey && k === "i") { e.preventDefault(); selectInverse(ed); return; }
-    if (mod && k === "c") { e.preventDefault(); copySelection(ed, e.shiftKey); return; }
-    if (mod && k === "x") { e.preventDefault(); cutSelection(ed); return; }
-    if (mod && k === "v") { if (ed.prose.layer && ed.tool === "text") return; e.preventDefault(); paste(ed); return; }   // text paste arrives as a paste event
-    if ((e.key === "Delete" || e.key === "Backspace") && ed.selection) { e.preventDefault(); deleteSelection(ed); return; }
-    if (e.key === "Escape" && ed.selection) { selectNone(ed); return; }
-    if (mod) return;
-    const fkey = /^F(\d+)$/.exec(e.key);
-    if (fkey) {
-      const n = Number(fkey[1]);
-      if (n >= 1 && n <= 10) { e.preventDefault(); typeSetGlyph(n - 1); return; }
-      if (n === 11 || n === 12) { e.preventDefault(); cycleCharset(n === 11 ? -1 : 1); return; }
-    }
-    if (k === "x" && !e.shiftKey) { toggleMirror("x"); return; }
-    if (k === "x" && e.shiftKey) { toggleMirror("y"); return; }
-    if (e.key === "[" || e.key === "]") { setBrushSize(ed, ed.brushSize + (e.key === "]" ? 1 : -1)); return; }
-    // the Brush's modes have keys of their own: H half block, B character
-    if (k === "h" || k === "b") { ed.brushMode = k === "h" ? "half" : "char"; ed.chooseTool("brush"); return; }
-    const tool = tools.find((t) => t.key === e.key.toLowerCase());
+    if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+    const tool = tools.find((t) => t.key === e.key.toLowerCase())
+      // Moebius calls the typewriter "keyboard mode" and the fill "paintbucket"
+      ?? (e.key.toLowerCase() === "k" ? tools.find((t) => t.id === "text") : undefined)
+      ?? (e.key.toLowerCase() === "p" ? tools.find((t) => t.id === "fill") : undefined);
     if (tool) ed.chooseTool(tool.id);
   });
 
@@ -511,7 +585,7 @@ async function start(): Promise<void> {
       copy: () => void copySelection(ed), cut: () => cutSelection(ed), paste: () => paste(ed), deleteSel: () => deleteSelection(ed),
       zoomIn: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)), zoomOut: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)),
       zoomFit: () => setZoomFit(true), canvasSize: canvasDialog, sauce: () => sauceDialog(ed), mirror: () => toggleMirror("x"),
-      joint: openJoint,
+      joint: openJoint, shortcuts: () => shortcutSheet(bindings),
     });
   }
   (window as unknown as { kd: unknown }).kd = { ed, tools, view, lib, io, joint };

@@ -4,6 +4,7 @@ import {
   deviceShiftPx, encodeApng, flipCells, layerGrid, planDepth, renderDepthView, renderGrid, scaleCellsNearest,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
+import { type Binding, comboLabel } from "./keymap.js";
 import { convertPixels } from "./shadeans.js";
 import { download, field, h, numberInput } from "./ui.js";
 
@@ -215,3 +216,41 @@ export function wiggleDialog(ed: Editor, baseName: string): void {
 }
 
 export type { ContentLayer };
+
+/**
+ * The shortcut sheet, built from the keymap itself so it cannot go stale.
+ * Bindings that are Moebius's own key are marked, because that is the point of
+ * them: an artist who draws with keys already knows those.
+ */
+export function shortcutSheet(bindings: readonly Binding[]): void {
+  const groups = new Map<string, Binding[]>();
+  for (const b of bindings) {
+    if (!b.label) continue;   // a run of keys documented by its first entry
+    if (!groups.has(b.group)) groups.set(b.group, []);
+    groups.get(b.group)!.push(b);
+  }
+  /** F1 … F10 rather than ten rows of it */
+  const keysOf = (b: Binding): string => {
+    const combos = Array.isArray(b.combo) ? b.combo : [b.combo];
+    const run = /^(alt\+shift\+|alt\+|)f1$/.exec(combos[0]);
+    if (run) return `${comboLabel(combos[0])} … ${comboLabel(`${run[1]}f10`)}`;
+    const digits = /^(ctrl|alt)\+0$/.exec(combos[0]);
+    if (digits) return `${comboLabel(combos[0])} … ${comboLabel(`${digits[1]}+7`)}`;   // one row for the eight
+    return combos.map((c) => comboLabel(c)).join("  or  ");
+  };
+  const columns = h("div.sheet");
+  for (const [name, list] of groups) {
+    columns.append(h("section", {}, h("h4", {}, name),
+      ...list.map((b) => h("div.sheet-row", {},
+        h("kbd", {}, keysOf(b)),
+        h("span", {}, b.label),
+        b.moebius ? h("span.tag", { title: "the same key as Moebius" }, "mœb") : h("span")))));
+  }
+  const close = (): void => backdrop.remove();
+  const backdrop = modal("Keyboard", [
+    h("p.hint", {}, "Keys marked ", h("span.tag", {}, "mœb"), " are Moebius's own, so they are where an artist who draws with keys expects them. Everything else is jockoshop's."),
+    columns,
+  ], [h("button.primary", { onclick: close }, "Close")], 880);
+  backdrop.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Escape") { e.stopPropagation(); close(); } });
+  backdrop.querySelector("button")?.focus();
+}

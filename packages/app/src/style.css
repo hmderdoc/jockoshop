@@ -77,6 +77,13 @@ h4:first-child { margin-top: 0; }
 .font-dialog .font-preview-box .hint { margin: 0 0 4px; }
 .font-dialog .font-preview-box .hint + canvas { margin-bottom: 12px; }
 .font-pick { font: inherit; }
+/* the shortcut sheet: as many columns as fit, each group kept whole */
+.sheet { columns: 3 240px; column-gap: 22px; overflow-y: auto; }
+.sheet section { break-inside: avoid; margin: 0 0 14px; }
+.sheet h4 { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.sheet-row { display: grid; grid-template-columns: auto 1fr auto; gap: 8px; align-items: baseline; padding: 1px 0; }
+.sheet-row kbd { font-size: 11px; white-space: nowrap; color: var(--text); }
+.sheet-row span { font-size: 12px; }
 .font-pick[title*="not a font"] { color: var(--hot); }
 .layers .field select { width: 92px; }
 .layers .row { flex-wrap: wrap; }

@@ -205,6 +205,45 @@ export class Editor {
     this.setProps("Shape brush", l, patch, () => refreshShapeLayer(l));
   }
 
+  /**
+   * Moebius's colour keys, ported as they behave there.
+   *
+   * Pressing the number of the colour you are already on moves to its bright
+   * twin, and pressing it again comes back — but changing hue while bright
+   * stays bright, which is what makes Ctrl+1..7 usable without looking. A
+   * 24-bit colour counts as "bright" for this, so the first press lands on a
+   * palette colour.
+   */
+  toggleFg(n: number): void {
+    const cur = this.fg;
+    this.setBrush({ fg: cur === n || (cur >= 8 && cur !== n + 8) ? n + 8 : n });
+  }
+
+  toggleBg(n: number): void {
+    const cur = this.bg;
+    this.setBrush({ bg: cur === n || (cur >= 8 && cur !== n + 8) ? n + 8 : n });
+  }
+
+  /** Step through the 16 palette colours, wrapping. */
+  stepFg(d: 1 | -1): void {
+    const cur = this.fg < 16 ? this.fg : 7;
+    this.setBrush({ fg: (cur + d + 16) % 16 });
+  }
+
+  stepBg(d: 1 | -1): void {
+    const cur = this.bg < 16 ? this.bg : 0;
+    this.setBrush({ bg: (cur + d + 16) % 16 });
+  }
+
+  /** Light grey on black, the colour a terminal starts in. */
+  defaultColors(): void {
+    this.setBrush({ fg: 7, bg: 0 });
+  }
+
+  swapColors(): void {
+    this.setBrush({ fg: this.bg, bg: this.fg });
+  }
+
   /** Turn a draw channel on or off; for a selected shape, the background channel is whether it has a background. */
   setDrawChannel(key: "drawGlyph" | "drawFg" | "drawBg", on: boolean): void {
     this[key] = on;

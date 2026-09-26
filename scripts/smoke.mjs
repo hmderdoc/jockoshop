@@ -902,7 +902,7 @@ await page.keyboard.press("v");
 await drag([6, 14], [16, 24]);   // inside the selection: moves just those cells
 const movedSel = await kd(() => { const g = window.kd.ed.comp.grid, s = window.kd.ed.selection; return { to: g.get(15, 24).glyph, from: g.get(5, 14).glyph, kept: g.get(35, 22).glyph, sel: s && s.has(15, 24) && !s.has(5, 14) }; });
 check("with a selection, Move lifts and moves only the selected cells, and the selection follows", movedSel.to === 201 && movedSel.from !== 201 && movedSel.kept === 188 && movedSel.sel === true, JSON.stringify(movedSel));
-await page.keyboard.down("Meta"); await page.keyboard.press("d"); await page.keyboard.up("Meta");
+await page.keyboard.press("Escape");   // Cmd+D is Moebius's Default Colour now; Escape deselects
 await kd(() => { const e = window.kd.ed; e.shapeStyle = "char"; e.emit("ui"); });
 await shot("15c-shape-layer");
 
@@ -1337,6 +1337,102 @@ await aspectTo("square");
 await settle();
 check("SAUCE records the choice", await kd(() => window.kd.ed.doc.aspectRatio) === "square");
 await shot("21-fonts-aspect");
+
+// ===================================================== keys, aligned with Moebius
+await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed);
+const colours = () => kd(() => ({ fg: window.kd.ed.fg, bg: window.kd.ed.bg }));
+/** press with real modifiers held */
+const chord = async (mods, key) => {
+  for (const m of mods) await page.keyboard.down(m);
+  await page.keyboard.press(key);
+  for (const m of [...mods].reverse()) await page.keyboard.up(m);
+};
+
+await kd(() => window.kd.ed.setBrush({ fg: 7, bg: 0 }));
+await chord(["Control"], "1");
+check("Ctrl+1 sets the foreground", (await colours()).fg === 1);
+await chord(["Control"], "1");
+check("Ctrl+1 again goes to its bright twin, as in Moebius", (await colours()).fg === 9);
+await chord(["Control"], "1");
+check("and back again", (await colours()).fg === 1);
+await chord(["Control"], "1");
+await chord(["Control"], "4");
+check("changing hue while bright stays bright", (await colours()).fg === 12, JSON.stringify(await colours()));
+await chord(["Alt"], "2");
+check("Alt+2 sets the background", (await colours()).bg === 2);
+await chord(["Alt"], "2");
+check("Alt+2 again goes bright", (await colours()).bg === 10);
+
+await kd(() => window.kd.ed.setBrush({ fg: 7, bg: 0 }));
+await chord(["Control"], "ArrowDown");
+check("Ctrl+Down steps the foreground on", (await colours()).fg === 8);
+await chord(["Control"], "ArrowUp");
+check("Ctrl+Up steps it back", (await colours()).fg === 7);
+await chord(["Control"], "ArrowRight");
+check("Ctrl+Right steps the background on", (await colours()).bg === 1);
+await chord(["Control"], "ArrowLeft");
+check("Ctrl+Left steps it back", (await colours()).bg === 0);
+
+await kd(() => window.kd.ed.setBrush({ fg: 3, bg: 5 }));
+await chord(["Meta", "Shift"], "x");
+check("Cmd+Shift+X swaps foreground and background", JSON.stringify(await colours()) === JSON.stringify({ fg: 5, bg: 3 }));
+await chord(["Meta"], "d");
+check("Cmd+D is Moebius's Default Colour, not deselect", JSON.stringify(await colours()) === JSON.stringify({ fg: 7, bg: 0 }));
+await kd(() => window.kd.ed.setSelection(window.kd.ed.selection));
+await page.keyboard.press("m");
+await drag([2, 2], [6, 4]);
+check("a selection is still made", await kd(() => (window.kd.ed.selection?.count() ?? 0) > 0));
+await page.keyboard.press("Escape");
+check("Escape is what deselects now", await kd(() => window.kd.ed.selection === null));
+
+const setBefore = await kd(() => window.kd.ed.charset);
+await chord(["Alt"], "F3");
+check("Alt+F3 jumps straight to character set 3, the way Moebius does", await kd(() => window.kd.ed.charset) === 2, `${setBefore} -> ${await kd(() => window.kd.ed.charset)}`);
+await chord(["Alt", "Shift"], "F1");
+check("Alt+Shift+F1 reaches the second ten sets", await kd(() => window.kd.ed.charset) === 10);
+await chord(["Control"], "/");
+check("Ctrl+/ goes back to the first set", await kd(() => window.kd.ed.charset) === 0);
+await chord(["Control"], ".");
+check("Ctrl+. still steps to the next set", await kd(() => window.kd.ed.charset) === 1);
+
+await kd(() => { window.kd.ed.brushSize = 1; window.kd.ed.chooseTool("brush"); });
+await chord(["Alt"], "=");
+check("Alt+= grows the brush", await kd(() => window.kd.ed.brushSize) === 2);
+await chord(["Alt"], "-");
+check("Alt+- shrinks it", await kd(() => window.kd.ed.brushSize) === 1);
+
+const iceBefore = await kd(() => window.kd.ed.doc.iceColors);
+await chord(["Meta"], "e");
+check("Cmd+E toggles iCE colours", await kd(() => window.kd.ed.doc.iceColors) === !iceBefore);
+await chord(["Meta"], "e");
+await chord(["Meta"], "f");
+check("Cmd+F toggles 9px letter spacing", await kd(() => window.kd.ed.doc.letterSpacing9px) === true);
+await chord(["Meta"], "f");
+await chord(["Meta", "Alt"], "m");
+check("Cmd+Alt+M is mirror mode", await kd(() => window.kd.ed.mirrorX) === true);
+await chord(["Meta", "Alt"], "m");
+
+// the sheet is generated from the same table the handler uses
+await page.keyboard.press("?");
+await page.waitForSelector(".sheet", { timeout: 5000 });
+const sheet = await kd(() => ({
+  groups: [...document.querySelectorAll(".sheet h4")].map((x) => x.textContent),
+  rows: document.querySelectorAll(".sheet-row").length,
+  moeb: document.querySelectorAll(".sheet .tag").length,
+  hasColour: [...document.querySelectorAll(".sheet-row")].some((r) => /Foreground colour/.test(r.textContent)),
+}));
+check("? shows a shortcut sheet built from the keymap, with the Moebius keys marked",
+  sheet.rows > 30 && sheet.moeb > 15 && sheet.hasColour && sheet.groups.includes("Colour"), JSON.stringify(sheet));
+await page.keyboard.press("Escape");
+check("Escape closes the sheet", await kd(() => !document.querySelector(".sheet")));
+
+// typing into a field must not fire drawing keys
+await kd(() => { const i = document.querySelector(".topbar input[type=number]"); i.focus(); });
+const fgBefore = await kd(() => window.kd.ed.fg);
+await chord(["Control"], "5");
+check("a focused field keeps the colour keys out of the way", await kd(() => window.kd.ed.fg) === fgBefore);
+await kd(() => document.activeElement.blur());
 
 check("no console errors or page errors", problems.length === 0, problems.slice(0, 3).join(" ; "));
 
