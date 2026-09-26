@@ -120,3 +120,20 @@ export function isVgaPalette(palette: readonly Rgb[]): boolean {
   }
   return true;
 }
+
+/** Oklab back to sRGB, the inverse of `rgbToOklab`. */
+export function oklabToRgb(lab: readonly [number, number, number]): Rgb {
+  const [L, A, B] = lab;
+  const l = (L + 0.3963377774 * A + 0.2158037573 * B) ** 3;
+  const m = (L - 0.1055613458 * A - 0.0638541728 * B) ** 3;
+  const s = (L - 0.0894841775 * A - 1.291485548 * B) ** 3;
+  const lin = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return lin.map((v) => {
+    const c = v <= 0.0031308 ? v * 12.92 : 1.055 * Math.max(0, v) ** (1 / 2.4) - 0.055;
+    return Math.max(0, Math.min(255, Math.round(c * 255)));
+  }) as unknown as Rgb;
+}

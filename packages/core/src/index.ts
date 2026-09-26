@@ -9,6 +9,7 @@ export * from "./match.js";
 export * from "./matte.js";
 export * from "./cleanup.js";
 export * from "./fontmatch.js";
+export * from "./adjust.js";
 export * from "./document.js";
 export * from "./remap.js";
 export * from "./composite.js";

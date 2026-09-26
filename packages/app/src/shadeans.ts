@@ -1,6 +1,6 @@
 import {
   type BitmapFont, type CellGrid, type GlyphInfo, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES,
-  addImageAsset, applyMatte, borderColor, createImageLayer, gridFromShadeans, hasCp437Ramp, matchImageToFont,
+  addImageAsset, adjustSource, applyMatte, borderColor, createImageLayer, gridFromShadeans, hasCp437Ramp, matchImageToFont,
   shadeansOptionBlock,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
@@ -130,6 +130,11 @@ export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, view
     coverage = Uint8Array.from({ length: cols * rows * 2 }, (_, i) => a[i * 4 + 3]);
   }
   if (convertsWithFont(font)) {
+    // shadeans does these in the wasm before it matches; this path has to do
+    // them itself or the sliders would silently stop working on these fonts
+    adjustSource(rgba, crop.width, crop.height, {
+      autoLevels: layer.options.autoLevels, contrast: layer.options.contrast, saturation: layer.options.saturation,
+    });
     // half-cell coverage is a CP437 trick (it makes ▀▄); this match works whole cells
     const whole = coverage && Uint8Array.from({ length: cols * rows }, (_, i) => {
       const x = i % cols, y = (i - x) / cols;

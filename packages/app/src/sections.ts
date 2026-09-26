@@ -581,12 +581,13 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
     commit(label, before);
   };
 
-  const slider = (label: string, key: keyof ShadeansOptions, min: number, max: number, step: number, fallback: number, title: string): HTMLElement => {
+  const slider = (label: string, key: keyof ShadeansOptions, min: number, max: number, step: number, fallback: number, title: string, shadeansOnly = false): HTMLElement => {
     let from: Recipe | null = null;
+    const dead = shadeansOnly && convertsWithFont(ed.font);
     const current = (layer.options[key] as number | undefined) ?? fallback;
     const readout = h("span.muted", {}, String(current));
     const input = h("input", {
-      type: "range", min, max, step, value: String(current), title,
+      type: "range", min, max, step, value: String(current), title, disabled: dead,
       oninput: () => {   // live while dragging; one undo step on release
         from ??= snapshot();
         (layer.options as unknown as Record<string, number>)[key] = Number(input.value);
@@ -595,7 +596,7 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
       },
       onchange: () => { if (from) { commit(label, from); from = null; } },
     });
-    return h("label.slider", { title }, h("span", {}, label), input, readout);
+    return h(`label.slider${dead ? ".dead" : ""}`, { title: dead ? `${title} — shadeans only, and this font does not use shadeans` : title }, h("span", {}, label), input, readout);
   };
   const flag = (label: string, key: "truecolor" | "blocks" | "autoLevels", title: string): HTMLElement =>
     check(label, layer.options[key], title, () => change(label, () => { layer.options[key] = !layer.options[key]; }));
@@ -654,15 +655,15 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
         flag("blocks only", "blocks", "Pixel-art baseline: no shade characters"),
         flag("levels", "autoLevels", "Stretch the source to the full black-to-white range")),
       byFont && h("p.hint", { title: "shadeans spells cells with CP437's ░▒▓█ and half blocks. This font has no such characters at those codes, so the picture is matched against the shapes it does have." },
-        "Matched against this font's own characters — it has no CP437 shade ramp. The dither settings below are shadeans' and do not apply; pick an IBM font to get them back."),
-      !tc && slider("texture", "lambda", 0.01, 1, 0.01, 0.1, "How visible dither texture is. 1 = pixel art; lower = more and bolder shading"),
-      !tc && slider("coherence", "coherence", 0, 0.006, 0.0005, 0.002, "Pulls neighbouring cells onto shared colours. 0 = off, 0.006 = flat"),
+        "Matched against this font's own characters — it has no CP437 shade ramp. Levels, contrast and saturation still apply; texture, coherence, chroma lift, local contrast and smooth are shadeans' own and are greyed out."),
+      !tc && slider("texture", "lambda", 0.01, 1, 0.01, 0.1, "How visible dither texture is. 1 = pixel art; lower = more and bolder shading", true),
+      !tc && slider("coherence", "coherence", 0, 0.006, 0.0005, 0.002, "Pulls neighbouring cells onto shared colours. 0 = off, 0.006 = flat", true),
       slider("contrast", "contrast", 0.5, 2, 0.05, 1, "Lightness contrast of the source"),
       slider("saturation", "saturation", 0, 2, 0.05, 1, "Colour strength of the source"),
-      slider("chroma lift", "autoChroma", 0, 0.4, 0.01, tc ? 0 : 0.16, "Lifts muted colours onto real palette colours instead of grey"),
-      slider("local contrast", "localContrast", 0, 1, 0.05, tc ? 0 : 0.5, "Pushes shapes away from their surroundings in lightness"),
-      slider("equalize", "equalize", 0, 1, 0.05, 0, "Spreads bunched-up tones apart; try 0.4 on dim, murky pictures"),
-      slider("smooth", "smooth", 0, 4, 1, 0, "Edge-preserving smoothing passes on the source"),
+      slider("chroma lift", "autoChroma", 0, 0.4, 0.01, tc ? 0 : 0.16, "Lifts muted colours onto real palette colours instead of grey", true),
+      slider("local contrast", "localContrast", 0, 1, 0.05, tc ? 0 : 0.5, "Pushes shapes away from their surroundings in lightness", true),
+      slider("equalize", "equalize", 0, 1, 0.05, 0, "Spreads bunched-up tones apart; try 0.4 on dim, murky pictures", true),
+      slider("smooth", "smooth", 0, 4, 1, 0, "Edge-preserving smoothing passes on the source", true),
       h("div.row.wrap", {},
         check("cut out background", !!matte,
           "Make the background see-through before the picture is matched, so no cell ends up half background. Keys on the colour beside it — the source's border to begin with.",

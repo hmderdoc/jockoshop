@@ -232,3 +232,6 @@ input.depth { display: block; width: 100%; padding: 0; margin: 0; accent-color: 
 .joint-say { display: flex; gap: 4px; padding: 5px 6px; border-top: 1px solid var(--line); }
 .joint-say input { flex: 1; min-width: 0; padding: 2px 6px; }
 .joint-say button { padding: 2px 8px; }
+
+.slider.dead { opacity: .45; }
+.slider.dead input { cursor: not-allowed; }

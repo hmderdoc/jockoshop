@@ -355,6 +355,29 @@ await kd(() => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName
 await settle();
 await settle();
 
+// the source sliders are about the picture, not the matcher, so they have to
+// work on a font that does not go through shadeans at all
+const sliderEffect = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const sh = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/app/src/shadeans.ts");
+  const ed = window.kd.ed;
+  const l = ed.doc.layers.find((x) => x.type === "image");
+  if (!l) return null;
+  const font = core.parseRawFont(new Uint8Array(await (await fetch("fonts/c64/PETSCII%20unshifted.F08")).arrayBuffer()));
+  const view = { font, glyphs: core.glyphInfoFromFont(font) };
+  const hash = (g) => { let h = 0; for (let i = 0; i < g.glyph.length; i++) h = (h * 31 + g.glyph[i] + g.fg[i] * 7 + g.bg[i] * 13) >>> 0; return h; };
+  const keep = { ...l.options };
+  const run = async (o) => { Object.assign(l.options, o); await sh.refreshImageLayer(ed.doc, l, view); return hash(l.cache); };
+  const base = await run({ contrast: 1, saturation: 1, autoLevels: false });
+  const out = { base, contrast: await run({ contrast: 1.8 }), saturation: await run({ contrast: 1, saturation: 0 }), levels: await run({ saturation: 1, autoLevels: true }) };
+  Object.assign(l.options, keep);
+  await sh.refreshImageLayer(ed.doc, l, ed);
+  return out;
+});
+check("levels, contrast and saturation still work on a font that does not use shadeans",
+  sliderEffect && sliderEffect.contrast !== sliderEffect.base && sliderEffect.saturation !== sliderEffect.base && sliderEffect.levels !== sliderEffect.base,
+  JSON.stringify(sliderEffect));
+
 // --- the other half of the problem: art that is already cells, with no source
 // to re-key. Rasterize the backdrop version and delete it the old way.
 const fringeAfterDelete = async (clean) => {
