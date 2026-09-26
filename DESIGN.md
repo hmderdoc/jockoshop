@@ -246,6 +246,12 @@ Order is flexible; everything here is in scope.
    blocks come from the bitmaps and a custom font may have none. Verified against 48,211 real SAUCE records from
    the corpus in `ansi-llm/raw_ansi_art`: 99.3% resolve exactly, and everything unresolved is junk in the field
    (tool names, artist handles, null bytes) rather than a font we lack.
+   The character grid sizes itself from `font.height` — a cell is 8 wide but 8, 14, 16 or 19 rows tall, and a
+   picker canvas fixed at 16 rows paints a shorter font's glyphs into its top half while the clicks are still
+   computed against the whole element. Measured before the fix: 240 of 256 squares picked the wrong character in an
+   8-row font, 192 in EGA, 207 in VGA25G, 0 in IBM VGA — which is why it went unnoticed.
+   `.xb` export passes the current font as `fontBytes`; XBIN is the format that carries its own font, and reading
+   one back already prefers the embedded bitmap, so a document round-trips through it in the right font.
    The font browser (`app/fontpicker.ts`) follows the TheDraw picker's shape — filter, list, arrow-to-preview,
    Enter — but previews the *document* rather than a sample string, plus the 256-character map. That is the only
    thing that actually answers "which font does this file want": the font is the codepage, so the same bytes are a

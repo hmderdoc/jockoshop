@@ -7,7 +7,7 @@ import {
   type CellMatch, CellGrid, type CellsLayer, type ContentLayer, type FontLayer, type ImageLayer, type KeyRule, type ProseLayer,
   MATTE_DEFAULTS, SHADEANS_DEFAULTS, type SelectMode, Selection, type ShadeansOptions, type ShapeLayer, addFontAsset, cellPatchCommand, createRaster,
   emptyIsTransparentRule, findCells, fontsOfAsset, identityRemap, isIdentityRemap, randomRemap, refreshFontLayer,
-  refreshProseLayer, refreshShapeLayer, remapPresets, renderGrid, replaceCells,
+  refreshProseLayer, refreshShapeLayer, remapPresets, renderGrid, replaceCells, standardFont,
 } from "@killerdraw/core";
 import { type BrushMode, type Editor, MAX_BRUSH_SIZE, type ShapeFill, type ShapeStyle } from "./editor.js";
 import { type FontLibrary, pickFont } from "./fonts.js";
@@ -172,7 +172,11 @@ export function shapePanel(ed: Editor, tool: Tool): Panel {
 }
 
 export function characterPanel(ed: Editor, primary = true): Panel {
-  const picker = h("canvas.glyph-picker", { width: 16 * 8, height: 16 * 16 });
+  // every size here comes from the font: a cell is 8 wide but 8, 14, 16 or 19
+  // rows tall depending on it, and a canvas sized for one font shows another
+  // one's glyphs in the wrong place — so clicking picks the wrong character
+  const cellH = ed.font.height;
+  const picker = h("canvas.glyph-picker", { width: 16 * 8, height: 16 * cellH });
   const all = new CellGrid(16, 16);
   for (let i = 0; i < 256; i++) all.setAt(i, { glyph: i, fg: 15, bg: 0 });
   const raster = createRaster(16, 16, ed.font);
@@ -181,16 +185,22 @@ export function characterPanel(ed: Editor, primary = true): Panel {
   picker.addEventListener("click", (e) => {
     const r = picker.getBoundingClientRect();
     const x = Math.floor(((e.clientX - r.left) / r.width) * 16), y = Math.floor(((e.clientY - r.top) / r.height) * 16);
-    ed.setBrush({ glyph: Math.max(0, Math.min(255, y * 16 + x)) });
+    ed.setBrush({ glyph: Math.max(0, Math.min(255, Math.min(15, y) * 16 + Math.min(15, x))) });
   });
   const update = (): void => {
     const ctx = picker.getContext("2d")!;
     ctx.putImageData(image, 0, 0);
     ctx.strokeStyle = "#ff50dc";
-    ctx.strokeRect((ed.glyph % 16) * 8 + 0.5, Math.floor(ed.glyph / 16) * 16 + 0.5, 7, 15);
+    ctx.strokeRect((ed.glyph % 16) * 8 + 0.5, Math.floor(ed.glyph / 16) * cellH + 0.5, 7, cellH - 1);
   };
   update();
-  return { el: panel(primary ? "character" : "character.aside", "Character", primary, "All 256 CP437 characters. F1–F10 pick from the active F-key set (F11/F12 change set; the set shows in the footer while typing).", picker), update };
+  const set = standardFont(ed.doc.fontName)?.name ?? ed.doc.fontName;
+  return {
+    el: panel(primary ? "character" : "character.aside", "Character", primary,
+      `All 256 characters of ${set} — the font decides which character each code is, so this changes with it. F1–F10 pick from the active F-key set (F11/F12 change set; the set shows in the footer while typing).`,
+      picker),
+    update,
+  };
 }
 
 // ------------------------------------------------------------------ left: selecting

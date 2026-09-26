@@ -1242,12 +1242,57 @@ const hinted = await kd(async () => {
 });
 check("plain text carries no font name, so there is something to tell the artist about", hinted.named === false && hinted.glyph === 225, JSON.stringify(hinted));
 
+// the character grid: clicking a glyph has to give you that glyph, in every font.
+// A cell is 8 wide but 8, 14, 16 or 19 rows tall, so a picker sized for one font
+// paints another's glyphs somewhere the clicks do not agree with.
+for (const [name, height] of [["IBM VGA", 16], ["IBM VGA50", 8], ["IBM EGA", 14], ["IBM VGA25G", 19], ["C64 PETSCII unshifted", 8]]) {
+  await kd((n) => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName: n }); }, name);
+  await page.waitForFunction((h) => window.kd.ed.font.height === h, { timeout: 5000 }, height).catch(() => {});
+  await settle();
+  const out = await kd(() => {
+    const c = document.querySelector("canvas.glyph-picker");
+    const r = c.getBoundingClientRect(), fh = window.kd.ed.font.height;
+    const sx = r.width / c.width, sy = r.height / c.height;
+    let wrong = 0;
+    for (let code = 0; code < 256; code++) {
+      const col = code % 16, row = Math.floor(code / 16);
+      // click where the glyph is actually painted, not where a 16-row split would put it
+      c.dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: r.left + (col * 8 + 4) * sx, clientY: r.top + (row * fh + fh / 2) * sy }));
+      if (window.kd.ed.glyph !== code) wrong++;
+    }
+    return { fh, fits: c.height === 16 * fh, wrong };
+  });
+  check(`character grid: every one of the 256 squares picks its own glyph in ${name}`,
+    out.wrong === 0 && out.fits && out.fh === height, JSON.stringify(out));
+}
+await kd(() => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName: "IBM VGA" }); });
+await settle();
+
 // a name nothing can serve — real files carry tool names in this field
 await kd(() => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName: "SAUCE-ADDER V1.3" }); });
 await settle();
 const junk = await kd(() => ({ kept: window.kd.ed.doc.fontName, height: window.kd.ed.font.height, status: window.kd.ed.status }));
 check("an unknown font name is kept (so exports still ask for it) and drawn in IBM VGA, with a note",
   junk.kept === "SAUCE-ADDER V1.3" && junk.height === 16 && /not a font jockoshop has/.test(junk.status), JSON.stringify(junk));
+
+// exporting .xb carries the font with it, which is why you would pick XBIN
+const xbRound = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const ed = window.kd.ed;
+  const before = ed.doc.fontName;
+  ed.setProps("Font", ed.doc, { fontName: "C64 PETSCII unshifted" });
+  await new Promise((r) => setTimeout(r, 900));
+  const drawnIn = ed.font.height;
+  const bytes = core.encodeXbin(ed.comp.grid, { iceColors: ed.doc.iceColors, sauce: ed.doc.sauce, fontBytes: ed.font.glyphs });
+  const back = core.parseArt(bytes, "out.xb");
+  const same = !!back.fontBytes && back.fontBytes.length === ed.font.glyphs.length
+    && [...back.fontBytes].every((b, i) => b === ed.font.glyphs[i]);
+  ed.setProps("Font", ed.doc, { fontName: before });
+  return { drawnIn, carried: !!back.fontBytes, rows: back.fontBytes ? back.fontBytes.length / 256 : 0, same };
+});
+check("exporting .xb embeds the font the art is drawn in, byte for byte",
+  xbRound.drawnIn === 8 && xbRound.carried && xbRound.rows === 8 && xbRound.same, JSON.stringify(xbRound));
+await settle();
 
 // art that carries its own font bitmap: XBIN, and the embedded one wins
 const embedded = await kd(async () => {

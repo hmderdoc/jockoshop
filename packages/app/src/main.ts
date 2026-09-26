@@ -315,7 +315,9 @@ async function start(): Promise<void> {
     item(".ans", "ANSI + SAUCE", "ans", () => encodeAnsi(flat(), exportOpts())),
     h("button", { onclick: export3d, title: "CSI = … z depth tags; other terminals ignore them" }, "3dBBS .ans", h("span.muted", {}, "with depth layers")),
     item(".bin", "binary text (even width)", "bin", () => encodeBin(flat(), exportOpts())),
-    item(".xb", "XBin, compressed", "xb", () => encodeXbin(flat(), { iceColors: ed.doc.iceColors, sauce: ed.doc.sauce })),
+    // XBIN is the format that carries its own font, which is the point of choosing
+    // it: the file opens in the font it was drawn in, whatever the viewer defaults to
+    item(".xb", "XBin, compressed", "xb", () => encodeXbin(flat(), { iceColors: ed.doc.iceColors, sauce: ed.doc.sauce, fontBytes: ed.font.glyphs })),
     item(".tnd", "TundraDraw, 24-bit", "tnd", () => encodeTundra(flat(), ed.doc.palette), "Every colour exact; TundraDraw and PabloDraw read it"),
     item(".msg", "Synchronet Ctrl-A", "msg", () => encodeCtrlA(flat(), ed.doc.palette), "Colour codes for message bodies and menus; PabloDraw reads it too"),
     item(".txt", "text, CP437", "txt", () => encodeText(flat(), "cp437"), "Characters only"),
