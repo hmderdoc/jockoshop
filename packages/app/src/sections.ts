@@ -10,7 +10,7 @@ import {
   refreshProseLayer, refreshShapeLayer, remapPresets, renderGrid, replaceCells, standardFont,
 } from "@killerdraw/core";
 import { type BrushMode, type Editor, MAX_BRUSH_SIZE, type ShapeFill, type ShapeStyle } from "./editor.js";
-import { type FontLibrary, pickFont } from "./fonts.js";
+import { type FontLibrary, pickFont, randomFontOfHeight } from "./fonts.js";
 import { iconButton } from "./icons.js";
 import {
   copySelection, cutSelection, deleteSelection, despeckleLayer, fillSelection, maskLayerFromSelection, paste,
@@ -314,6 +314,24 @@ export function fontPanel(ed: Editor, lib: FontLibrary, layer: FontLayer): Panel
       },
       onchange: () => { if (typingFrom) { commit("Edit text", typingFrom, false); typingFrom = null; } },
     });
+    /** the height of the font this run is set in, so a random one can match it */
+    const runHeight = (): number | null => { try { return fontsOfAsset(ed.doc, run.font)[run.fontIndex]?.height ?? null; } catch { return null; } };
+    /**
+     * Swap in another font of the same height, straight onto the canvas. Same
+     * height on purpose: a random font that also resizes the text reads as a
+     * mistake rather than a suggestion. One undo step, so trying a few costs
+     * nothing.
+     */
+    const randomize = async (): Promise<void> => {
+      const height = runHeight();
+      if (height === null) { ed.setStatus("This run's font is not loaded, so there is nothing to match."); return; }
+      const currentFile = run.font.replace(/^assets\/fonts\//, "");
+      const pick = randomFontOfHeight(lib, height, currentFile, run.fontIndex);
+      if (!pick) { ed.setStatus(`No other ${height}-row font to try${lib.entries.length ? "" : " — run npm run fonts first"}.`); return; }
+      const bytes = await lib.bytes(pick.file);
+      change("Random font", () => { run.font = addFontAsset(ed.doc, pick.file, bytes); run.fontIndex = pick.index; });
+      ed.setStatus(`${pick.name || pick.file} — ${pick.type}, ${pick.height} rows. Roll again, or undo to go back.`);
+    };
     return h("div.run", {},
       h("div.row", {},
         h("button.grow.font-name", {
@@ -322,6 +340,7 @@ export function fontPanel(ed: Editor, lib: FontLibrary, layer: FontLayer): Panel
             if (pick) change("Change font", () => { run.font = addFontAsset(ed.doc, pick.entry.file, pick.bytes); run.fontIndex = pick.entry.index; });
           },
         }, fontName()),
+        h("button.icon.roll", { title: "Try another font of the same height, on the canvas. Undo puts the old one back.", onclick: () => void randomize() }, "⚄"),
         layer.runs.length > 1 && h("button.icon", { title: "Remove this run", onclick: () => change("Remove run", () => { layer.runs.splice(i, 1); }) }, "×")),
       text);
   });

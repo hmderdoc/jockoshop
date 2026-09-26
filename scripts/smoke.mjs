@@ -1013,6 +1013,103 @@ await page.waitForFunction((n) => window.kd.ed.doc.layers.length > n, { timeout:
 check("Enter picks the font and adds the text layer", await kd(() => { const l = window.kd.ed.active; return l.type === "font" && l.runs[0].font.toLowerCase().includes("cyb"); }));
 await page.keyboard.press("Escape");
 
+// --- sorting and the row range: with ~3,500 fonts, finding one is the job
+const rows = () => kd(() => [...document.querySelectorAll(".font-item")].map((i) => ({
+  name: i.children[0].textContent, type: i.children[1].textContent, h: Number(i.children[2].textContent),
+})));
+const sortBy = async (label) => {
+  await kd((l) => [...document.querySelectorAll(".font-head .col")].find((c) => c.textContent.startsWith(l)).click(), label);
+  await settle();
+};
+await kd(() => window.kd.ed.chooseTool("text"));
+await clickButton("+ font switch", ".toolbox").catch(() => {});
+await kd(() => [...document.querySelectorAll(".toolbox .font-name")][0].click());
+await page.waitForSelector(".font-list .font-item", { timeout: 5000 });
+const defaultOrder = await rows();
+check("the list starts in name order, so it can be read", defaultOrder.length > 2
+  && defaultOrder.slice(0, 20).every((r, i, a) => i === 0 || a[i - 1].name.toLowerCase() <= r.name.toLowerCase()),
+  JSON.stringify(defaultOrder.slice(0, 3)));
+
+await sortBy("Rows");
+const byRows = await rows();
+check("clicking Rows sorts by height", byRows.every((r, i, a) => i === 0 || a[i - 1].h <= r.h), JSON.stringify(byRows.slice(0, 3)));
+await sortBy("Rows");
+const byRowsDesc = await rows();
+check("clicking it again reverses the order", byRowsDesc.every((r, i, a) => i === 0 || a[i - 1].h >= r.h) && byRowsDesc[0].h >= byRows[0].h, `${byRows[0].h}..${byRows.at(-1).h} -> ${byRowsDesc[0].h}..${byRowsDesc.at(-1).h}`);
+await sortBy("Type");
+check("and by type", (await rows()).every((r, i, a) => i === 0 || a[i - 1].type <= r.type));
+await sortBy("Name");
+
+// the point of the range: ask for one size and stop being shown the shorter ones
+const setRows = async (lo, hi) => {
+  await kd((a, b) => {
+    const nums = [...document.querySelectorAll(".dialog input[type=number]")];
+    nums[0].value = a; nums[0].dispatchEvent(new Event("input", { bubbles: true }));
+    nums[1].value = b; nums[1].dispatchEvent(new Event("input", { bubbles: true }));
+  }, String(lo), String(hi));
+  await settle();
+};
+await setRows("", 8);
+const maxOnly = await rows();
+check("a max on its own still lets the shorter fonts through — the old complaint",
+  maxOnly.every((r) => r.h <= 8) && maxOnly.some((r) => r.h < 8), JSON.stringify([...new Set(maxOnly.map((r) => r.h))]));
+await setRows(8, 8);
+const exactly = await rows();
+check("the same number at both ends gives exactly that size", exactly.length > 0 && exactly.every((r) => r.h === 8), JSON.stringify([...new Set(exactly.map((r) => r.h))]));
+await setRows(4, "");
+await kd(() => [...document.querySelectorAll(".dialog button")].find((b) => b.textContent === "only").click());
+await settle();
+const onlyBtn = await rows();
+check("“only” snaps the range shut on the min", onlyBtn.length > 0 && onlyBtn.every((r) => r.h === 4), JSON.stringify([...new Set(onlyBtn.map((r) => r.h))]));
+await page.keyboard.press("Escape");
+await settle();
+
+// --- randomize: another font, same height, on the canvas, undoable
+const runFont = () => kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const ed = window.kd.ed, l = ed.active, run = l.runs[0];
+  const f = core.fontsOfAsset(ed.doc, run.font)[run.fontIndex];
+  const g = l.cache;
+  let ink = 0;
+  if (g) for (let i = 0; i < g.present.length; i++) if (g.present[i]) ink++;
+  return { name: f?.name ?? "?", height: f?.height ?? 0, file: run.font, index: run.fontIndex, cells: ink, rows: g?.height ?? 0 };
+});
+await kd(() => window.kd.ed.chooseTool("text"));
+await page.waitForSelector(".toolbox .roll", { timeout: 5000 });
+const beforeRoll = await runFont();
+await kd(() => document.querySelector(".toolbox .roll").click());
+await page.waitForFunction((was) => {
+  const r = window.kd.ed.active.runs[0];
+  return `${r.font}#${r.fontIndex}` !== was;
+}, { timeout: 5000 }, `${beforeRoll.file}#${beforeRoll.index}`).catch(() => {});
+await settle();
+const afterRoll = await runFont();
+check("the dice picks a different font", `${afterRoll.file}#${afterRoll.index}` !== `${beforeRoll.file}#${beforeRoll.index}`,
+  `${beforeRoll.name} -> ${afterRoll.name}`);
+check("…of the same height, so the layout does not jump", afterRoll.height === beforeRoll.height && afterRoll.rows === beforeRoll.rows,
+  `${beforeRoll.height} rows tall, ${beforeRoll.rows} cells -> ${afterRoll.height} / ${afterRoll.rows}`);
+check("…and it is drawn on the canvas, not just named", afterRoll.cells > 0 && afterRoll.cells !== beforeRoll.cells,
+  `${beforeRoll.cells} cells -> ${afterRoll.cells}`);
+check("…and says which font you got", /rows\. Roll again/.test(await kd(() => window.kd.ed.status)), await kd(() => window.kd.ed.status));
+await mod(["Meta"], () => page.keyboard.press("z"));
+await settle();
+const undone = await runFont();
+check("undo puts the original font back", `${undone.file}#${undone.index}` === `${beforeRoll.file}#${beforeRoll.index}` && undone.cells === beforeRoll.cells,
+  `${afterRoll.name} -> ${undone.name}`);
+// rolling twice never hands back the font you already had
+const seen = new Set([`${beforeRoll.file}#${beforeRoll.index}`]);
+let repeats = 0;
+for (let i = 0; i < 4; i++) {
+  const was = await runFont();
+  await kd(() => document.querySelector(".toolbox .roll").click());
+  await settle();
+  const now = await runFont();
+  if (`${now.file}#${now.index}` === `${was.file}#${was.index}`) repeats++;
+  if (now.height !== beforeRoll.height) repeats += 100;
+  seen.add(`${now.file}#${now.index}`);
+}
+check("rolling again always moves, and never off the height", repeats === 0 && seen.size > 2, `${seen.size} different fonts, ${repeats} repeats`);
+
 // --- unsaved changes: save now / proceed anyway / cancel
 await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
 await page.waitForFunction(() => window.kd?.ed);

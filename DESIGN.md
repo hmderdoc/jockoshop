@@ -246,6 +246,11 @@ Order is flexible; everything here is in scope.
    blocks come from the bitmaps and a custom font may have none. Verified against 48,211 real SAUCE records from
    the corpus in `ansi-llm/raw_ansi_art`: 99.3% resolve exactly, and everything unresolved is junk in the field
    (tool names, artist handles, null bytes) rather than a font we lack.
+   TheDraw font picking (`app/fonts.ts`): with ~3,500 fonts the search *is* the feature, so the list sorts by any
+   column and filters by a row range rather than a bare maximum — a max on its own still shows every shorter font,
+   which was the complaint. `randomFontOfHeight` keeps the height fixed on purpose: a random font that also resizes
+   the text throws the layout out and reads as a mistake rather than a suggestion, and it excludes the current font
+   so rolling again always moves. It goes through the same undoable `change()` as picking one by hand.
    Keyboard (`app/keymap.ts` + the table in `main.ts`): shortcuts are data, and the sheet under `?` is generated
    from the same table, so it cannot drift from what the keys do. `mod` is Cmd on a Mac and Ctrl elsewhere; Moebius
    also uses bare Ctrl for colours and character sets, which off a Mac is the same physical key as `mod`, so a Ctrl
