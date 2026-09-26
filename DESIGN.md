@@ -246,6 +246,11 @@ Order is flexible; everything here is in scope.
    blocks come from the bitmaps and a custom font may have none. Verified against 48,211 real SAUCE records from
    the corpus in `ansi-llm/raw_ansi_art`: 99.3% resolve exactly, and everything unresolved is junk in the field
    (tool names, artist handles, null bytes) rather than a font we lack.
+   The font browser (`app/fontpicker.ts`) follows the TheDraw picker's shape — filter, list, arrow-to-preview,
+   Enter — but previews the *document* rather than a sample string, plus the 256-character map. That is the only
+   thing that actually answers "which font does this file want": the font is the codepage, so the same bytes are a
+   picture in one and a wall of the wrong letter in another. Opening art whose SAUCE names no font, where the
+   picture leans on the high range the codepages disagree about, says so in the status line.
    9px letter spacing was already rendered correctly (`render.ts`: the 9th column repeats the 8th for CP437
    192-223); it moved from inside the SAUCE dialog to a top-bar toggle beside iCE, which is where it was looked for.
    Aspect ratio (SAUCE flags bits 3-4): "stretch" scales the *drawing* vertically by 1.2 at 8px cells or 1.35 at 9px

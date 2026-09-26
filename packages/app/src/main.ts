@@ -1,5 +1,5 @@
 import {
-  ART_EXTENSIONS, type AspectRatio, aspectStretch, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, STANDARD_FONTS, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
+  ART_EXTENSIONS, type AspectRatio, aspectStretch, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
   deviceShiftPx, documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
   renderDepthView, renderGrid, saveProject, standardFont, stretchRows,
 } from "@killerdraw/core";
@@ -15,6 +15,7 @@ import { buildMenu } from "./menu.js";
 import { confirmUnsaved, sauceDialog, wiggleDialog } from "./dialogs.js";
 import { JointClient } from "./joint.js";
 import { jointDialog, jointPanel } from "./jointui.js";
+import { pickBitmapFont } from "./fontpicker.js";
 import { buildLeft } from "./left.js";
 import { buildRight } from "./right.js";
 import { liveProp, setBrushSize } from "./sections.js";
@@ -80,13 +81,29 @@ async function start(): Promise<void> {
   // the live composite: it also carries the re-matched cells of translucent layers
   const flat = () => ed.comp.grid;
 
+  /**
+   * Art that carries no SAUCE record says nothing about its font, and plain
+   * text never does — so it is drawn in IBM VGA, which is right for most of it
+   * and wrong for Amiga art, where the same bytes are different characters.
+   * Worth a word when the picture leans on the range the codepages disagree
+   * about, rather than letting it look broken.
+   */
+  const fontHint = (art: { sauce: { fontName: string } | null }): string => {
+    if (art.sauce?.fontName.trim()) return "";
+    let high = 0;
+    const g = ed.comp.grid;
+    for (let i = 0; i < g.glyph.length; i++) if (g.glyph[i] > 127) high++;
+    return high > g.glyph.length / 50 ? " It names no font, so it is drawn in IBM VGA — if that is Amiga art, pick an Amiga font from the top bar." : "";
+  };
+
   /** Open a picked file as the document: a project, or flat art as a one-layer document. */
   const openPicked = (file: Picked): void => {
     try {
       const project = isProject(file.name);
-      ed.setDocument(project ? loadProject(file.bytes) : documentFromArt(parseArt(file.bytes, file.name)), file.name, project ? file.path : undefined);
+      const art = project ? null : parseArt(file.bytes, file.name);
+      ed.setDocument(art ? documentFromArt(art) : loadProject(file.bytes), file.name, project ? file.path : undefined);
       remember(file.path);
-      ed.setStatus(`Opened ${file.name} — ${ed.doc.width}×${ed.doc.height}`);
+      ed.setStatus(`Opened ${file.name} — ${ed.doc.width}×${ed.doc.height}.${art ? fontHint(art) : ""}`);
     } catch (err) { ed.setStatus(`Could not open ${file.name}: ${(err as Error).message}`); }
   };
 
@@ -196,22 +213,29 @@ async function start(): Promise<void> {
     h("label.check", { title: "9-pixel cells, as VGA text mode drew them: every cell is a pixel wider, and the 9th column repeats the 8th for the box-drawing and block characters (CP437 192-223) so ─── and ███ join up. Recorded in SAUCE." },
       h("input", { type: "checkbox", checked: ed.doc.letterSpacing9px, onchange: () => ed.setProps("9px letter spacing", ed.doc, { letterSpacing9px: !ed.doc.letterSpacing9px }) }), "9px"));
 
-  /** The bitmap font: what the art is drawn in, and what SAUCE records. */
+  /**
+   * The bitmap font: what the art is drawn in, and what SAUCE records. It
+   * opens a browser rather than a list of 86 names, because the font is also
+   * the character set — the only way to tell which one a file wants is to see
+   * the file in it.
+   */
   const fontPick = h("span.row");
+  const browseFonts = async (): Promise<void> => {
+    const picked = await pickBitmapFont(ed, fonts, ed.doc.fontName);
+    if (picked && picked !== ed.doc.fontName) ed.setProps("Font", ed.doc, { fontName: picked });
+  };
   const renderFont = (): void => {
-    const embedded = ed.doc.assets.has(EMBEDDED_FONT_ASSET);
-    const known = !!standardFont(ed.doc.fontName);
-    const select = h("select", {
-      title: "The bitmap font this art is drawn in, by the name SAUCE records",
-      disabled: embedded,
-      onchange: () => ed.setProps("Font", ed.doc, { fontName: select.value }),
-    });
-    for (const f of STANDARD_FONTS) select.append(h("option", { value: f.name, selected: f.name === ed.doc.fontName }, `${f.name} (8×${f.height})`));
-    // a name we cannot draw still belongs in the list: it is what the file asks for
-    if (!known && !embedded) select.prepend(h("option", { value: ed.doc.fontName, selected: true }, `${ed.doc.fontName} — not available`));
-    fontPick.replaceChildren(embedded
-      ? h("span.muted.font-embedded", { title: "This file carries its own font bitmap, which is what it is drawn in. Remove it to choose a standard font." }, "font: embedded")
-      : select);
+    if (ed.doc.assets.has(EMBEDDED_FONT_ASSET)) {
+      fontPick.replaceChildren(h("span.muted.font-embedded", { title: "This file carries its own font bitmap, which is what it is drawn in. Remove it to choose a standard font." }, "font: embedded"));
+      return;
+    }
+    const known = standardFont(ed.doc.fontName);
+    fontPick.replaceChildren(h("button.font-pick", {
+      title: known
+        ? `Drawn in ${known.name}, 8×${known.height}. Click to browse the fonts with this picture in the preview.`
+        : `“${ed.doc.fontName}” is not a font jockoshop has, so this is drawn in IBM VGA. The name is kept for export. Click to choose one.`,
+      onclick: () => void browseFonts(),
+    }, known ? known.name : `${ed.doc.fontName} ⚠`));
   };
 
   /**
@@ -229,6 +253,7 @@ async function start(): Promise<void> {
       ["stretch", "4:3 CRT", "Drawn for a CRT: stretched vertically so it looks the way it did there"],
       ["square", "square", "Drawn for square pixels: shown as it is, and SAUCE says so"],
     ] as const) select.append(h("option", { value: v, selected: ed.doc.aspectRatio === v, title: tip }, label));
+    select.className = "aspect-pick";
     aspectPick.replaceChildren(select);
   };
 

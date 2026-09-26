@@ -69,7 +69,15 @@ h4:first-child { margin-top: 0; }
 .font-item:hover { background: #2a2d36; }
 .font-item.selected { background: #1d4e66; }
 .font-preview-box { margin-top: 10px; min-height: 120px; max-height: 260px; overflow: auto; background: #000; border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
-.font-preview { image-rendering: pixelated; }
+.font-preview { image-rendering: pixelated; display: block; }
+/* the bitmap-font browser shows the picture and the whole character set, so it needs the room */
+.font-dialog { width: min(900px, 94vw); }
+.font-dialog .font-list { height: 190px; }
+.font-dialog .font-preview-box { max-height: 340px; }
+.font-dialog .font-preview-box .hint { margin: 0 0 4px; }
+.font-dialog .font-preview-box .hint + canvas { margin-bottom: 12px; }
+.font-pick { font: inherit; }
+.font-pick[title*="not a font"] { color: var(--hot); }
 .layers .field select { width: 92px; }
 .layers .row { flex-wrap: wrap; }
 .wiggle-box { background: #000; border: 1px solid var(--line); margin: 6px 0 10px; display: grid; place-items: center; max-height: 46vh; overflow: auto; }

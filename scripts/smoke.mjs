@@ -1119,13 +1119,26 @@ const artSize = () => kd(() => {
   const a = document.querySelector("canvas.art");
   return { w: a.width, h: a.height, cssH: a.style.height, fontH: window.kd.ed.font.height, rows: window.kd.ed.doc.height };
 });
-const topSelect = (which) => kd((w) => {
-  const sels = [...document.querySelectorAll(".topbar select")];
-  return sels[w] ? sels[w].value : null;
-}, which);
+/** the font shown on the top-bar button, which is what the document is drawn in */
+const fontButton = () => kd(() => document.querySelector(".topbar .font-pick")?.textContent ?? null);
+/** choose a font through the browser, the way a person does: filter, arrow, Enter */
+const chooseFont = async (query, steps = 1) => {
+  await kd(() => document.querySelector(".topbar .font-pick").click());
+  await page.waitForSelector(".font-dialog", { timeout: 5000 });
+  await page.type(".font-dialog input[type=search]", query);
+  await settle();
+  for (let i = 0; i < steps; i++) await page.keyboard.press("ArrowDown");
+  await settle();
+  const previewed = await kd(() => document.querySelector(".font-item.selected span")?.textContent ?? null);
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => !document.querySelector(".font-dialog"), { timeout: 5000 });
+  await settle();
+  return previewed;
+};
+const aspectTo = (v) => kd((val) => { const s = document.querySelector(".topbar .aspect-pick"); s.value = val; s.dispatchEvent(new Event("change", { bubbles: true })); }, v);
 
 const vgaBase = await artSize();
-check("a new document is drawn in IBM VGA, 16 rows to a cell", vgaBase.fontH === 16 && await topSelect(0) === "IBM VGA", JSON.stringify(vgaBase));
+check("a new document is drawn in IBM VGA, 16 rows to a cell", vgaBase.fontH === 16 && await fontButton() === "IBM VGA", JSON.stringify(vgaBase));
 
 // 9px letter spacing: the toggle lives beside iCE, and widens every cell
 const nineBox = await kd(() => {
@@ -1159,15 +1172,75 @@ await kd(() => [...document.querySelectorAll(".topbar label.check")].find((x) =>
 await settle();
 
 // picking a font by its SAUCE name loads a different bitmap, with its own cell height
-await kd(() => { const s = [...document.querySelectorAll(".topbar select")][0]; s.value = "IBM VGA50"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+const previewedVga50 = await chooseFont("VGA50", 1);
+check("the browser filters by name and previews as you arrow through it", previewedVga50 === "IBM VGA50", String(previewedVga50));
 await page.waitForFunction(() => window.kd.ed.font.height === 8, { timeout: 5000 }).catch(() => {});
 const halfHeight = await artSize();
 check("choosing IBM VGA50 loads an 8-row font and redraws at that size", halfHeight.fontH === 8 && halfHeight.h === vgaBase.h / 2, JSON.stringify(halfHeight));
 check("the document records the font it is drawn in, for SAUCE", await kd(() => window.kd.ed.doc.fontName) === "IBM VGA50");
-await kd(() => { const s = [...document.querySelectorAll(".topbar select")][0]; s.value = "Amiga Topaz 2+"; s.dispatchEvent(new Event("change", { bubbles: true })); });
-await page.waitForFunction(() => window.kd.ed.doc.fontName === "Amiga Topaz 2+", { timeout: 5000 }).catch(() => {});
+await chooseFont("Topaz 2+", 1);
+check("an Amiga font loads too", await kd(() => window.kd.ed.font.height) === 16 && await fontButton() === "Amiga Topaz 2+", await fontButton());
+
+// the browser previews the document itself, and cancelling changes nothing
+await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  // Amiga ASCII is built out of byte 225, which is a different character in every codepage
+  const g = core.CellGrid.filled(30, 6, 225, 7, 0);
+  const doc = core.createDocument(30, 6);
+  const l = core.createCellsLayer("amiga", 30, 6);
+  l.grid = g;
+  doc.layers = [l];
+  window.kd.ed.setDocument(doc, "amiga.asc");
+});
 await settle();
-check("an Amiga font loads too", await kd(() => window.kd.ed.font.height) === 16 && await topSelect(0) === "Amiga Topaz 2+");
+await kd(() => document.querySelector(".topbar .font-pick").click());
+await page.waitForSelector(".font-dialog", { timeout: 5000 });
+await settle();
+const browser2 = await kd(() => ({
+  canvases: document.querySelectorAll(".font-preview-box canvas").length,
+  labels: [...document.querySelectorAll(".font-preview-box .hint")].map((x) => x.textContent),
+  all: document.querySelector(".font-dialog .muted")?.textContent ?? "",
+}));
+check("the font browser previews your own picture, and the whole character set under it",
+  browser2.canvases === 2 && browser2.labels[0] === "your picture" && /^86 of 86/.test(browser2.all), JSON.stringify(browser2));
+const beforeCancel = await kd(() => window.kd.ed.doc.fontName);
+await page.keyboard.press("Escape");
+await page.waitForFunction(() => !document.querySelector(".font-dialog"), { timeout: 5000 });
+check("Escape leaves the font as it was", await kd(() => window.kd.ed.doc.fontName) === beforeCancel);
+
+// the same bytes, two fonts: this is what "the Amiga file looked wrong" was
+const inkOf = () => kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const ed = window.kd.ed, f = ed.font;
+  let ink = "";
+  for (let y = 0; y < f.height; y++) ink += f.glyphs[225 * f.height + y].toString(16).padStart(2, "0");
+  return ink;
+});
+const ibmInk = await inkOf();
+await chooseFont("Topaz 1", 1);
+const amigaInk = await inkOf();
+check("byte 225 is a different character in an Amiga font than in an IBM one — which is the whole problem",
+  ibmInk !== amigaInk && await fontButton() === "Amiga Topaz 1", `IBM ${ibmInk.slice(0, 12)}… vs Amiga ${amigaInk.slice(0, 12)}…`);
+check("choosing a font is undoable like any other document change",
+  await kd(() => { window.kd.ed.undo(); return window.kd.ed.doc.fontName; }) === "IBM VGA");
+
+// art that names no font says so, rather than just looking wrong
+await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const bytes = new Uint8Array(80 * 5).fill(225);
+  for (let y = 1; y < 5; y++) bytes[y * 80 - 1] = 10;
+  window.kd.io_lastStatus = null;
+  window.kd.ed.setDocument(core.documentFromArt(core.parseArt(bytes, "noname.asc")), "noname.asc");
+});
+await settle();
+// the hint is produced by the open path, so drive that instead of setDocument
+const hinted = await kd(async () => {
+  const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+  const bytes = new Uint8Array(400).fill(225);
+  const art = core.parseArt(bytes, "noname.asc");
+  return { named: !!art.sauce?.fontName?.trim(), glyph: art.grid.glyph[0] };
+});
+check("plain text carries no font name, so there is something to tell the artist about", hinted.named === false && hinted.glyph === 225, JSON.stringify(hinted));
 
 // a name nothing can serve — real files carry tool names in this field
 await kd(() => { const ed = window.kd.ed; ed.setProps("Font", ed.doc, { fontName: "SAUCE-ADDER V1.3" }); });
@@ -1190,17 +1263,17 @@ await page.waitForFunction(() => window.kd.ed.font.height === 8, { timeout: 5000
 const emb = await kd(() => ({
   height: window.kd.ed.font.height,
   asset: window.kd.ed.doc.assets.has("assets/fonts/document.fnt"),
-  picker: [...document.querySelectorAll(".topbar select")].length,
+  picker: !!document.querySelector(".topbar .font-pick"),
   label: document.querySelector(".topbar .font-embedded")?.textContent ?? "",
 }));
-check("an XBIN's own font bitmap is what its art is drawn in", embedded && emb.height === 8 && emb.asset, JSON.stringify(emb));
+check("an XBIN's own font bitmap is what its art is drawn in", embedded && emb.height === 8 && emb.asset && emb.picker === false, JSON.stringify(emb));
 check("the font picker gives way to it, since the file carries the font", emb.label.includes("embedded"), emb.label);
 
 // aspect ratio: art drawn for a 4:3 screen is stretched to look as it did
 await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
 await page.waitForFunction(() => window.kd?.ed);
 const flatAr = await artSize();
-await kd(() => { const s = [...document.querySelectorAll(".topbar select")][1]; s.value = "stretch"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await aspectTo("stretch");
 await settle();
 const tallAr = await artSize();
 check("4:3 aspect stretches the drawing by 1.2 at 8-pixel cells",
@@ -1215,7 +1288,7 @@ const arHit = await kd(() => {
   return { cell: window.kd.ed.doc.height, y: a.height / (16 * z) };
 });
 check("a stretched canvas still holds exactly the document's rows", Math.abs(arHit.y * 1 - arHit.cell * 1.2) < 0.5, JSON.stringify(arHit));
-await kd(() => { const s = [...document.querySelectorAll(".topbar select")][1]; s.value = "square"; s.dispatchEvent(new Event("change", { bubbles: true })); });
+await aspectTo("square");
 await settle();
 check("SAUCE records the choice", await kd(() => window.kd.ed.doc.aspectRatio) === "square");
 await shot("21-fonts-aspect");
