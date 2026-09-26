@@ -1,6 +1,6 @@
 [package]
 name = "jockoshop"
-version = "0.1.8"
+version = "0.1.9"
 description = "jockoshop desktop shell"
 edition = "2021"
 publish = false
