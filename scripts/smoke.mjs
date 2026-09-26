@@ -1590,6 +1590,38 @@ await chord(["Control"], "5");
 check("a focused field keeps the colour keys out of the way", await kd(() => window.kd.ed.fg) === fgBefore);
 await kd(() => document.activeElement.blur());
 
+// --- export options: each format offers only what it can actually carry
+await page.goto("http://127.0.0.1:5183/", { waitUntil: "networkidle0" });
+await page.waitForFunction(() => window.kd?.ed);
+await kd(() => [...document.querySelectorAll(".topbar button")].find((x) => (x.getAttribute("aria-label") || "").startsWith("Export")).click());
+await settle();
+await kd(() => [...document.querySelectorAll(".menu button")].find((b) => b.textContent.startsWith("Export As")).click());
+await page.waitForSelector(".backdrop .dialog", { timeout: 5000 });
+const optsFor = async (ext) => {
+  await kd((e) => { const s = document.querySelector(".backdrop select"); s.value = e; s.dispatchEvent(new Event("change", { bubbles: true })); }, ext);
+  await settle();
+  return kd(() => [...document.querySelectorAll(".backdrop label.check")].map((l) => l.textContent.trim()));
+};
+const ansOpts = await optsFor(".ans"), xbOpts = await optsFor(".xb"), seqOpts = await optsFor(".seq");
+check("XBIN offers the font and palette it can carry; ANSI does not pretend to",
+  xbOpts.includes("embed the font") && xbOpts.includes("embed the palette")
+  && !ansOpts.includes("embed the font") && ansOpts.includes("SAUCE record"),
+  `ans ${JSON.stringify(ansOpts)} xb ${JSON.stringify(xbOpts)}`);
+check(".seq asks for the one screen colour a C64 has, and no switches it cannot honour",
+  seqOpts.length === 0 && await kd(() => /screen colour/.test(document.querySelector(".backdrop").textContent)), JSON.stringify(seqOpts));
+// the palette control lives here too, and changes the document
+await kd(() => [...document.querySelectorAll(".backdrop button")].find((b) => b.textContent === "Commodore 64").click());
+await settle();
+check("the C64 palette can be put on the document, and it is not VGA's",
+  await kd(async () => {
+    const core = await import("/@fs/Volumes/Crucial2TB/Projects/killerdraw/packages/core/src/index.ts");
+    const p = window.kd.ed.doc.palette;
+    return !core.isVgaPalette(p) && p[1][0] === 255 && p[1][1] === 255 && p[1][2] === 255 && p[0][0] === 0;
+  }));
+await kd(() => [...document.querySelectorAll(".backdrop button")].find((b) => b.textContent === "VGA").click());
+await settle();
+await kd(() => document.querySelector(".backdrop").remove());
+
 check("no console errors or page errors", problems.length === 0, problems.slice(0, 3).join(" ; "));
 
 await browser.close();

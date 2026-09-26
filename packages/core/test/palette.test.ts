@@ -42,7 +42,7 @@ describe("XBIN carrying a palette", () => {
   const grid = CellGrid.filled(4, 2, 65, 7, 1);
 
   it("writes it and reads the same values back", () => {
-    const bytes = encodeXbin(grid, { palette: C64_PALETTE, sauce: false });
+    const bytes = encodeXbin(grid, { palette: C64_PALETTE, sauce: false, iceColors: false });
     const back = parseXbin(bytes);
     expect(back.palette).toBeDefined();
     // XBIN stores six bits per channel, so values come back quantised, not identical
@@ -54,8 +54,8 @@ describe("XBIN carrying a palette", () => {
   });
 
   it("leaves the flag clear when no palette is given, so a plain file stays plain", () => {
-    const bytes = encodeXbin(grid, { sauce: false });
+    const bytes = encodeXbin(grid, { sauce: false, iceColors: false });
     expect(parseXbin(bytes).palette).toBeUndefined();
-    expect(bytes.length).toBeLessThan(encodeXbin(grid, { palette: C64_PALETTE, sauce: false }).length);
+    expect(bytes.length).toBeLessThan(encodeXbin(grid, { palette: C64_PALETTE, sauce: false, iceColors: false }).length);
   });
 });

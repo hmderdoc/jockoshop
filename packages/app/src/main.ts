@@ -1,5 +1,5 @@
 import {
-  ART_EXTENSIONS, type AspectRatio, aspectStretch, isVgaPalette, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
+  ART_EXTENSIONS, type AspectRatio, C64_PALETTE, VGA_PALETTE, aspectStretch, encodeSeq, isVgaPalette, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
   deviceShiftPx, documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
   renderDepthView, renderGrid, saveProject, standardFont, stretchRows,
 } from "@killerdraw/core";
@@ -12,7 +12,7 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
-import { confirmUnsaved, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
+import { confirmUnsaved, exportDialog, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
 import { JointClient } from "./joint.js";
 import { jointDialog, jointPanel } from "./jointui.js";
 import { pickBitmapFont } from "./fontpicker.js";
@@ -325,6 +325,7 @@ async function start(): Promise<void> {
       // from 16colo.rs packs, 15 carry one. Only the plain VGA one is left out.
       ...(isVgaPalette(ed.doc.palette) ? {} : { palette: ed.doc.palette }),
     }), "Carries its own font, and its palette when the document has one"),
+    item(".seq", "PETSCII, for a Commodore", "seq", () => encodeSeq(flat()).bytes, "Foreground colours only — a C64 has one background for the whole screen"),
     item(".tnd", "TundraDraw, 24-bit", "tnd", () => encodeTundra(flat(), ed.doc.palette), "Every colour exact; TundraDraw and PabloDraw read it"),
     item(".msg", "Synchronet Ctrl-A", "msg", () => encodeCtrlA(flat(), ed.doc.palette), "Colour codes for message bodies and menus; PabloDraw reads it too"),
     item(".txt", "text, CP437", "txt", () => encodeText(flat(), "cp437"), "Characters only"),
@@ -332,7 +333,31 @@ async function start(): Promise<void> {
     h("button", { onclick: exportPng }, ".png", h("span.muted", {}, "picture")),
     h("button", { onclick: exportWiggle, title: "An animated PNG that rocks between the two eyes' views of the depth layers — previewed and tuned before it saves" }, "3D wiggle .png…", h("span.muted", {}, "animated")),
     h("button", { onclick: exportAnaglyph, title: "The depth layers as a red / cyan stereo picture, for anaglyph glasses" }, "3D red/cyan .png", h("span.muted", {}, "anaglyph")));
+  exportMenu.append(h("button", { onclick: () => openExportDialog(), title: "Choose a format and what it should carry" }, "Export As…", h("span.muted", {}, "with options")));
   const exportBtn = iconButton("export", "Export…", { onclick: (e) => { e.stopPropagation(); exportMenu.hidden = !exportMenu.hidden; } });
+
+  /** Set the sixteen colours the document is drawn in and matched against. */
+  const setPalette = (which: "vga" | "c64"): void => {
+    ed.setProps("Palette", ed.doc, { palette: [...(which === "c64" ? C64_PALETTE : VGA_PALETTE)] }, reconvertImages);
+  };
+  /** Formats that have something to decide, and what each can carry. */
+  const openExportDialog = (): void => exportDialog(ed, [
+    { ext: ".ans", label: "ANSI + SAUCE", note: "What almost everything reads. The flags below go in its SAUCE record.",
+      can: ["ice", "ninePx", "sauce"],
+      save: (o) => download(`${baseName()}.ans`, encodeAnsi(flat(), { ...exportOpts(), iceColors: o.iceColors, letterSpacing9px: o.ninePx, ...(o.sauce ? {} : { sauce: undefined }) })) },
+    { ext: ".xb", label: "XBin", note: "Carries its own font and palette, which is the reason to choose it — almost every XBIN in the wild does both.",
+      can: ["font", "palette", "compress", "ice", "sauce"],
+      save: (o) => download(`${baseName()}.xb`, encodeXbin(flat(), {
+        iceColors: o.iceColors, compress: o.compress, sauce: o.sauce ? ed.doc.sauce : false,
+        ...(o.embedFont ? { fontBytes: ed.font.glyphs } : {}),
+        ...(o.embedPalette ? { palette: ed.doc.palette } : {}),
+      })) },
+    { ext: ".seq", label: "PETSCII, for a Commodore", note: "A C64 holds one background colour for the whole screen, so the file cannot change it per cell.",
+      can: ["background"],
+      save: (o) => download(`${baseName()}.seq`, encodeSeq(flat(), { background: o.background }).bytes) },
+    { ext: ".bin", label: "binary text", note: "Raw attribute pairs, even width only.", can: ["ice", "sauce"],
+      save: (o) => download(`${baseName()}.bin`, encodeBin(flat(), { ...exportOpts(), iceColors: o.iceColors })) },
+  ], setPalette);
   document.addEventListener("click", () => { exportMenu.hidden = true; });
 
   // recent files (desktop: paths that can be reopened)
@@ -585,7 +610,7 @@ async function start(): Promise<void> {
     await buildMenu({
       newDocument, open: openFile, importLayer, save: () => saveProjectFile(), saveAs: () => saveProjectFile(true),
       exportAns: () => download(`${baseName()}.ans`, encodeAnsi(flat(), exportOpts())), exportPng, exportWiggle, export3d,
-      exportMore: () => { exportMenu.hidden = false; },
+      exportMore: openExportDialog,
       undo: () => ed.undo(), redo: () => ed.redo(),
       selectAll: () => selectAll(ed), selectNone: () => selectNone(ed), selectInverse: () => selectInverse(ed),
       copy: () => void copySelection(ed), cut: () => cutSelection(ed), paste: () => paste(ed), deleteSel: () => deleteSelection(ed),

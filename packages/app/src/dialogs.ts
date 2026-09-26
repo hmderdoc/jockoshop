@@ -5,6 +5,8 @@ import {
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 import { type Binding, comboLabel } from "./keymap.js";
+import { C64_PALETTE, commonestBackground, encodeSeq, isVgaPalette } from "@killerdraw/core";
+import { colorName } from "./ui.js";
 import { convertPixels } from "./shadeans.js";
 import { download, field, h, numberInput } from "./ui.js";
 
@@ -253,4 +255,80 @@ export function shortcutSheet(bindings: readonly Binding[]): void {
   ], [h("button.primary", { onclick: close }, "Close")], 880);
   backdrop.addEventListener("keydown", (e) => { if ((e as KeyboardEvent).key === "Escape") { e.stopPropagation(); close(); } });
   backdrop.querySelector("button")?.focus();
+}
+
+/** What an export can be told, per format. `save` gets the settled options. */
+export interface ExportFormat {
+  ext: string;
+  label: string;
+  note: string;
+  /** which switches this format can actually carry */
+  can?: ("font" | "palette" | "compress" | "ice" | "ninePx" | "sauce" | "background")[];
+  save(o: ExportChoices): void;
+}
+
+export interface ExportChoices {
+  embedFont: boolean; embedPalette: boolean; compress: boolean;
+  iceColors: boolean; ninePx: boolean; sauce: boolean; background: number;
+}
+
+/**
+ * The export options that only some formats have.
+ *
+ * XBIN can carry its own font and palette, which is the reason to choose it —
+ * of the XBIN art on 16colo.rs, effectively all of it does. `.seq` has to be
+ * told the one background a C64 screen gets. `.ans` has the SAUCE flags. A
+ * format that carries none of it shows none of it, so saving a plain `.ans`
+ * is still one click from the menu and this never gets in the way.
+ */
+export function exportDialog(ed: Editor, formats: ExportFormat[], onPalette: (p: "vga" | "c64") => void): void {
+  let pick = formats[0];
+  const choices: ExportChoices = {
+    embedFont: true, embedPalette: !isVgaPalette(ed.doc.palette), compress: true,
+    iceColors: ed.doc.iceColors, ninePx: ed.doc.letterSpacing9px, sauce: true,
+    background: commonestBackground(ed.comp.grid),
+  };
+  const body = h("div");
+  const close = (): void => backdrop.remove();
+
+  const render = (): void => {
+    const can = (k: NonNullable<ExportFormat["can"]>[number]): boolean => !!pick.can?.includes(k);
+    const check2 = (label: string, key: keyof ExportChoices, title: string): HTMLElement =>
+      h("label.check", { title }, h("input", {
+        type: "checkbox", checked: choices[key] as boolean,
+        onchange: (e: Event) => { Object.assign(choices, { [key]: (e.target as HTMLInputElement).checked }); render(); },
+      }), label);
+    const rows: (HTMLElement | false)[] = [
+      h("div.row", {}, h("span.muted", {}, "format"), h("select", {
+        onchange: (e: Event) => { pick = formats.find((f) => f.ext === (e.target as HTMLSelectElement).value)!; render(); },
+      }, ...formats.map((f) => h("option", { value: f.ext, selected: f.ext === pick.ext }, `${f.ext} — ${f.label}`)))),
+      h("p.hint", {}, pick.note),
+      can("font") && check2("embed the font", "embedFont", "The file opens in the font it was drawn in, whatever the viewer defaults to"),
+      can("palette") && check2("embed the palette", "embedPalette", "Carries the document's 16 colours. Almost every XBIN in the wild does."),
+      can("compress") && check2("compress", "compress", "XBIN's own run-length encoding"),
+      can("ice") && check2("iCE colours", "iceColors", "16 background colours instead of blink"),
+      can("ninePx") && check2("9px letter spacing", "ninePx", "Recorded in SAUCE for the viewer"),
+      can("sauce") && check2("SAUCE record", "sauce", "Title, author, group, and the flags above"),
+    ];
+    if (can("background")) {
+      const lost = encodeSeq(ed.comp.grid, { background: choices.background }).lostBackgrounds;
+      rows.push(h("div.row", { title: "A C64 holds one background colour for the whole screen, so the file cannot change it per cell" },
+        h("span.muted", {}, "screen colour"),
+        h("select", { onchange: (e: Event) => { choices.background = Number((e.target as HTMLSelectElement).value); render(); } },
+          ...C64_PALETTE.map((c, i) => h("option", { value: String(i), selected: i === choices.background }, `${i} ${colorName(i)}`))),
+        h("span.muted", {}, lost ? `${lost} cells lose their background` : "every cell keeps its background")));
+    }
+    rows.push(h("div.replace-with", { title: "The sixteen colours the document is drawn in and matched against" }, "document palette"),
+      h("div.row", {},
+        h("button", { class: isVgaPalette(ed.doc.palette) ? "active" : "", onclick: () => { onPalette("vga"); render(); } }, "VGA"),
+        h("button", { class: isVgaPalette(ed.doc.palette) ? "" : "active", onclick: () => { onPalette("c64"); render(); } }, "Commodore 64"),
+        h("span.muted", {}, isVgaPalette(ed.doc.palette) ? "the DOS sixteen" : "black 0, white 1 — not VGA's order")));
+    body.replaceChildren(...rows.filter((r): r is HTMLElement => !!r));
+  };
+  render();
+
+  const backdrop = modal("Export", [body], [
+    h("button", { onclick: close }, "Cancel"),
+    h("button.primary", { onclick: () => { close(); pick.save(choices); } }, "Save…"),
+  ], 560);
 }
