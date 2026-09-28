@@ -1,7 +1,7 @@
 /** The native menu bar of the desktop shell. Everything here also has a button or a shortcut in the app. */
 export interface MenuActions {
   newDocument(): void; open(): void; importLayer(): void; save(): void; saveAs(): void; joint(): void;
-  exportAns(): void; exportPng(): void; exportWiggle(): void; export3d(): void; exportMore(): void;
+  exportAns(): void; exportPng(): void; exportWiggle(): void; export3d(): void; exportMore(): void; upload(): void;
   undo(): void; redo(): void;
   selectAll(): void; selectNone(): void; selectInverse(): void;
   copy(): void; cut(): void; paste(): void; deleteSel(): void;
@@ -30,6 +30,7 @@ export async function buildMenu(a: MenuActions): Promise<void> {
     await item("Export 3D wiggle .png (animated)…", a.exportWiggle),
     await item("Export for 3dBBS…", a.export3d),
     await item("Export As…", a.exportMore, "CmdOrCtrl+Shift+E"), await sep(),
+    await item("Upload to a Board…", a.upload, "CmdOrCtrl+Shift+U"), await sep(),
     await PredefinedMenuItem.new({ item: "CloseWindow" }),
   ] });
   const edit = await Submenu.new({ text: "Edit", items: [

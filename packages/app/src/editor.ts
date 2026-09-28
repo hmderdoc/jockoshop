@@ -2,10 +2,11 @@ import {
   type BitmapFont, type CellGrid, type CellsLayer, type Color, type Command, type Composite, type ContentLayer,
   type GlyphInfo, History, type KdDocument, type Layer, REMAP_DEFAULTS, type Rect, type RemapOptions, type SelectMode,
   type Selection, type ShapeFill, type ShapeLayer, type ShapeStyle, WAND_DEFAULTS,
-  type WandOptions, composite, createDocument, findLayer, glyphInfoFromFont, groupCommand, propertyCommand,
+  type WandOptions, composite, createDocument, findLayer, glyphInfoFromFont, groupCommand, isLowAscii, propertyCommand,
   refreshProseLayer, refreshShapeLayer,
 } from "@killerdraw/core";
 import { DEFAULT_CHARSET } from "./charsets.js";
+import { glyphLabel as glyphName } from "./ui.js";
 import { applyOpacity, translucentLayers } from "./opacity.js";
 import { ProseEditing } from "./prosetool.js";
 
@@ -201,6 +202,14 @@ export class Editor {
 
   /** Set the brush. A selected shape layer takes the change too, undoably. */
   setBrush(values: { glyph?: number; fg?: Color; bg?: Color }): void {
+    // an ASCII document refuses the character rather than quietly swapping one
+    // in: a wrong glyph that draws is worse than a press that says why
+    if (values.glyph !== undefined && this.doc.asciiOnly && !isLowAscii(values.glyph)) {
+      this.setStatus(`${glyphName(values.glyph)} is outside ASCII, and this piece is ASCII only. Turn that off in the top bar to use it.`);
+      const { glyph: _dropped, ...rest } = values;
+      if (!Object.keys(rest).length) { this.emit("ui"); return; }
+      values = rest;
+    }
     Object.assign(this, values);
     const l = this.editableShape();
     if (!l) { this.emit("ui"); return; }

@@ -46,6 +46,27 @@ export interface FontMatchOptions {
    * choose, not just what it is scored against. `pickFixedBg` finds the best one.
    */
   fixedBg?: Color;
+  /**
+   * One foreground for the whole picture, the way a page of text has one ink.
+   *
+   * With both this and `fixedBg` set, colour carries nothing and the character
+   * has to carry the picture on its own — which is what makes the result read
+   * as text rather than as a coloured mosaic. The error is still scored against
+   * the forced colours, so the match answers the right question: not "which
+   * character and colours are nearest" but "which character, in this ink, is".
+   */
+  fixedFg?: Color;
+  /**
+   * Which character codes the match may choose. `isLowAscii` is the one that
+   * matters: it turns this into an ASCII converter.
+   *
+   * Narrowing the glyphs is only half of it — a space on a coloured background
+   * is a solid block, so a match free to pick backgrounds per cell would
+   * happily draw block art out of nothing but spaces and never break the
+   * letter of the rule. Pair this with `fixedBg` (see `pickFixedBg`), which
+   * gives the whole picture one background the way a real ASCII piece has one.
+   */
+  allow?: (code: number) => boolean;
 }
 
 const srgbToLinear = (v: number): number => {
@@ -65,14 +86,28 @@ interface Candidate {
 }
 
 /**
+ * Printable ASCII — the characters an ASCII piece is allowed to use. 32 to 126
+ * and nothing above, which is the whole point: no blocks, no shade ramp, no
+ * line drawing, nothing a CP437 font puts in the high half.
+ */
+export const isLowAscii = (code: number): boolean => code >= 32 && code <= 126;
+
+/**
  * One entry per distinct bitmap in the font. Fonts repeat themselves — blanks,
  * and whole ranges that are the same shape — and there is no point scoring the
  * same shape twice.
+ *
+ * `allow` narrows which codes may be chosen at all. It is applied before the
+ * dedupe, not after, and that order matters: in IBM VGA code 0 and code 32 are
+ * both blank, so the dedupe keeps code 0 and drops the space — filtering the
+ * finished list to ASCII would throw away the one character an ASCII picture
+ * needs most.
  */
-export function fontCandidates(font: BitmapFont): Candidate[] {
+export function fontCandidates(font: BitmapFont, allow?: (code: number) => boolean): Candidate[] {
   const h = font.height;
   const seen = new Map<string, Candidate>();
   for (let code = 0; code < 256; code++) {
+    if (allow && !allow(code)) continue;
     let key = "";
     const ink: number[] = [];
     for (let y = 0; y < h; y++) {
@@ -135,10 +170,30 @@ export function matchImageToFont(
   if (cols < 1 || rows < 1 || width < 1 || height < 1) return grid;
 
   const px = resample(rgba, width, height, cols * cw, rows * fh);
-  const cands = fontCandidates(font);
+  const cands = fontCandidates(font, opts.allow);
+  if (!cands.length) return grid;
   const bgCount = opts.iceColors ? 16 : 8;
   const fixed = opts.fixedBg;
-  const shortlist = Math.max(1, opts.shortlist ?? 6);
+  /**
+   * With one ink, colour says nothing and the character has to carry the
+   * tone — so the shortlist has to go. It is chosen by how cleanly a shape
+   * splits the cell's pixels, which on a flat cell is zero for every candidate
+   * alike: the six that survive are then just the first six codes, and the
+   * space is as likely to be missing as present. Scoring them all costs about
+   * twice the work of one pass over an alphabet this size.
+   */
+  const monochrome = opts.fixedFg !== undefined && fixed !== undefined;
+  const shortlist = monochrome ? cands.length : Math.max(1, opts.shortlist ?? 6);
+  // the two colours a monochrome picture is drawn in, and how far apart they are
+  const toLin = (c: Color): readonly [number, number, number] => {
+    const [r, g, b] = c >= 0x1000000 ? [(c >> 16) & 255, (c >> 8) & 255, c & 255] : palette[c & 15] ?? [0, 0, 0];
+    return [srgbToLinear(r), srgbToLinear(g), srgbToLinear(b)];
+  };
+  const monoFg = monochrome ? toLin(opts.fixedFg!) : null;
+  const monoBg = monochrome ? toLin(fixed!) : null;
+  const monoSpan = monoFg && monoBg
+    ? (monoFg[0] - monoBg[0]) ** 2 + (monoFg[1] - monoBg[1]) ** 2 + (monoFg[2] - monoBg[2]) ** 2
+    : 0;
   const threshold = opts.alphaThreshold ?? 128;
 
   // the palette in linear light, so a quantised choice is scored the same way
@@ -189,10 +244,38 @@ export function matchImageToFont(
       if (!best.length) continue;
       if (best.length < shortlist) best.sort((a, b2) => a.err - b2.err);
 
+      /**
+       * How much ink this cell wants, when ink is the only thing that can vary:
+       * where the cell's mean colour falls between the background and the
+       * foreground.
+       *
+       * Monochrome cannot use the pixel-wise error the colour paths use.
+       * Minimising squared error over a flat cell is a *threshold* — the
+       * derivative in the ink fraction has no interior zero, so it always
+       * answers "all of it" or "none of it", and a smooth gradient comes out as
+       * bare paper meeting a wall of the densest letter with nothing between.
+       * Matching the mean is what gives a tonal ramp, which is what the eye
+       * integrates a page of text into.
+       */
+      let target = 0;
+      if (monochrome) {
+        const mr = sr / cellPx - monoBg![0], mg = sg / cellPx - monoBg![1], mb = sb / cellPx - monoBg![2];
+        const dot = mr * (monoFg![0] - monoBg![0]) + mg * (monoFg![1] - monoBg![1]) + mb * (monoFg![2] - monoBg![2]);
+        target = monoSpan > 0 ? Math.min(1, Math.max(0, dot / monoSpan)) : 0;
+      }
+
       // then re-score the shortlist with the colours it will really be drawn in
       let pick = best[0], pickFg: Color = 7, pickBg: Color = 0, pickErr = Infinity;
       for (const b of best) {
         const n1 = b.ink.length, n0 = cellPx - n1;
+        if (monochrome) {
+          // the right amount of ink first, then — among characters carrying
+          // about that much — the one whose shape fits what is in the cell
+          const off = n1 / cellPx - target;
+          const err = cellPx * monoSpan * off * off + b.err;
+          if (err < pickErr) { pickErr = err; pick = b; pickFg = opts.fixedFg!; pickBg = fixed!; }
+          continue;
+        }
         let ir = 0, ig = 0, ib = 0;
         for (let k = 0; k < n1; k++) { const i = b.ink[k]; ir += cellR[i]; ig += cellG[i]; ib += cellB[i]; }
         const fr = n1 ? ir / n1 : sr / cellPx, fg2 = n1 ? ig / n1 : sg / cellPx, fb = n1 ? ib / n1 : sb / cellPx;
@@ -207,7 +290,7 @@ export function matchImageToFont(
           continue;
         }
         // nearest palette entry to each group's mean, then the error those really give
-        const f = nearestIndex(rgb(linearToSrgb(fr), linearToSrgb(fg2), linearToSrgb(fb)), palette, 16);
+        const f = opts.fixedFg ?? nearestIndex(rgb(linearToSrgb(fr), linearToSrgb(fg2), linearToSrgb(fb)), palette, 16);
         const g0 = fixed ?? nearestIndex(rgb(linearToSrgb(br), linearToSrgb(bg2), linearToSrgb(bb)), palette, bgCount);
         const pf = palLin[f], pb = palLin[g0 < 16 ? g0 : 0];
         const err = n1 * d2(fr, fg2, fb, pf[0], pf[1], pf[2]) + n0 * d2(br, bg2, bb, pb[0], pb[1], pb[2]) + b.err;
@@ -235,6 +318,19 @@ export function hasCp437Ramp(font: BitmapFont): boolean {
   return full > 0.98 && light < medium && medium < dark && dark < full;
 }
 
+/** Box-average an image down to `outW` x `outH`, back out as RGBA bytes. */
+function shrinkRgba(rgba: Uint8ClampedArray | Uint8Array, width: number, height: number, outW: number, outH: number): Uint8ClampedArray {
+  const lin = resample(rgba, width, height, outW, outH);
+  const out = new Uint8ClampedArray(outW * outH * 4);
+  for (let i = 0; i < outW * outH; i++) {
+    out[i * 4] = linearToSrgb(lin[i * 3]);
+    out[i * 4 + 1] = linearToSrgb(lin[i * 3 + 1]);
+    out[i * 4 + 2] = linearToSrgb(lin[i * 3 + 2]);
+    out[i * 4 + 3] = 255;
+  }
+  return out;
+}
+
 /**
  * The one background a whole picture should use, when the target only has one
  * — a C64 screen in character mode, where the background is a global register
@@ -252,10 +348,16 @@ export function pickFixedBg(
   const step = Math.max(1, Math.ceil(Math.max(cols, rows) / 24));   // ~24 cells across is plenty to choose on
   const c = Math.max(1, Math.round(cols / step)), r = Math.max(1, Math.round(rows / step));
   const limit = opts.iceColors ? 16 : 8;
+  // Shrink once, then try the backgrounds against that. Each try matches and
+  // scores, and both of those resample the source themselves — on a photo that
+  // is sixteen passes over every pixel to pick one of eight colours, which
+  // measured 2.1 s against 0.2 s for the match it is helping.
+  const w = c * 8, h = r * font.height;
+  const small = shrinkRgba(rgba, width, height, w, h);
   let best: Color = 0, bestErr = Infinity;
   for (let bg = 0; bg < limit; bg++) {
-    const grid = matchImageToFont(rgba, width, height, c, r, font, palette, { ...opts, coverage: undefined, fixedBg: bg, shortlist: 2 });
-    const err = cellError(grid, rgba, width, height, c, r, font, palette);
+    const grid = matchImageToFont(small, w, h, c, r, font, palette, { ...opts, coverage: undefined, fixedBg: bg, shortlist: 2 });
+    const err = cellError(grid, small, w, h, c, r, font, palette);
     if (err < bestErr) { bestErr = err; best = bg; }
   }
   return best;

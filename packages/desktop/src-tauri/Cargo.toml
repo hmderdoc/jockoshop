@@ -14,8 +14,19 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
+# uploading to a board: a browser may not open a socket, so FTP lives here.
+# native-tls gives explicit FTPS through the platform's own TLS (Security
+# framework / schannel / openssl) rather than compiling one in.
+suppaftp = { version = "12", features = ["native-tls"] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+
+[dev-dependencies]
+# the FTP tests drive the real client against a mock board, which needs a
+# runtime to await the commands on
+tokio = { version = "1", features = ["macros", "rt"] }
+# the wire contract with packages/app/src/remote.ts is asserted on real JSON
+serde_json = "1"
 
 [profile.release]
 codegen-units = 1

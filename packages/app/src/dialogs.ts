@@ -264,7 +264,17 @@ export interface ExportFormat {
   note: string;
   /** which switches this format can actually carry */
   can?: ("font" | "palette" | "compress" | "ice" | "ninePx" | "sauce" | "background")[];
-  save(o: ExportChoices): void;
+  /** the bytes this format would write — saved to disk here, sent to a board by the cloud dialog */
+  build(o: ExportChoices): Uint8Array;
+}
+
+/** The choices a format is built with when nobody has been asked: what a BBS upload wants. */
+export function defaultChoices(ed: Editor): ExportChoices {
+  return {
+    embedFont: true, embedPalette: !isVgaPalette(ed.doc.palette), compress: true,
+    iceColors: ed.doc.iceColors, ninePx: ed.doc.letterSpacing9px, sauce: true,
+    background: commonestBackground(ed.comp.grid),
+  };
 }
 
 export interface ExportChoices {
@@ -281,13 +291,9 @@ export interface ExportChoices {
  * format that carries none of it shows none of it, so saving a plain `.ans`
  * is still one click from the menu and this never gets in the way.
  */
-export function exportDialog(ed: Editor, formats: ExportFormat[], onPalette: (p: "vga" | "c64") => void): void {
+export function exportDialog(ed: Editor, formats: ExportFormat[], baseName: () => string, onPalette: (p: "vga" | "c64") => void): void {
   let pick = formats[0];
-  const choices: ExportChoices = {
-    embedFont: true, embedPalette: !isVgaPalette(ed.doc.palette), compress: true,
-    iceColors: ed.doc.iceColors, ninePx: ed.doc.letterSpacing9px, sauce: true,
-    background: commonestBackground(ed.comp.grid),
-  };
+  const choices: ExportChoices = defaultChoices(ed);
   const body = h("div");
   const close = (): void => backdrop.remove();
 
@@ -329,6 +335,9 @@ export function exportDialog(ed: Editor, formats: ExportFormat[], onPalette: (p:
 
   const backdrop = modal("Export", [body], [
     h("button", { onclick: close }, "Cancel"),
-    h("button.primary", { onclick: () => { close(); pick.save(choices); } }, "Save…"),
+    h("button.primary", { onclick: () => {
+      try { download(`${baseName()}${pick.ext}`, pick.build(choices)); close(); }
+      catch (err) { ed.setStatus(`Export failed: ${(err as Error).message}`); }
+    } }, "Save…"),
   ], 560);
 }

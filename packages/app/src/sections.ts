@@ -5,7 +5,7 @@
  */
 import {
   type CellMatch, CellGrid, type CellsLayer, type ContentLayer, type FontLayer, type ImageLayer, type KeyRule, type ProseLayer,
-  MATTE_DEFAULTS, SHADEANS_DEFAULTS, type SelectMode, Selection, type ShadeansOptions, type ShapeLayer, addFontAsset, cellPatchCommand, createRaster,
+  CONTOUR_DEFAULTS, type ContourOptions, MATTE_DEFAULTS, isLowAscii, SHADEANS_DEFAULTS, type SelectMode, Selection, type ShadeansOptions, type ShapeLayer, addFontAsset, cellPatchCommand, createRaster,
   emptyIsTransparentRule, findCells, fontsOfAsset, identityRemap, isIdentityRemap, randomRemap, refreshFontLayer,
   refreshProseLayer, refreshShapeLayer, remapPresets, renderGrid, replaceCells, standardFont,
 } from "@killerdraw/core";
@@ -190,6 +190,15 @@ export function characterPanel(ed: Editor, primary = true): Panel {
   const update = (): void => {
     const ctx = picker.getContext("2d")!;
     ctx.putImageData(image, 0, 0);
+    // an ASCII document veils the characters it will not accept, so the grid
+    // shows what is available rather than letting a click be refused later
+    if (ed.doc.asciiOnly) {
+      ctx.fillStyle = "#16171bcc";
+      for (let code = 0; code < 256; code++) {
+        if (isLowAscii(code)) continue;
+        ctx.fillRect((code % 16) * 8, Math.floor(code / 16) * cellH, 8, cellH);
+      }
+    }
     ctx.strokeStyle = "#ff50dc";
     ctx.strokeRect((ed.glyph % 16) * 8 + 0.5, Math.floor(ed.glyph / 16) * cellH + 0.5, 7, cellH - 1);
   };
@@ -197,7 +206,9 @@ export function characterPanel(ed: Editor, primary = true): Panel {
   const set = standardFont(ed.doc.fontName)?.name ?? ed.doc.fontName;
   return {
     el: panel(primary ? "character" : "character.aside", "Character", primary,
-      `All 256 characters of ${set} — the font decides which character each code is, so this changes with it. F1–F10 pick from the active F-key set (F11/F12 change set; the set shows in the footer while typing).`,
+      ed.doc.asciiOnly
+        ? `Printable ASCII of ${set}; the rest is veiled because this piece is ASCII only. The font decides which character each code is, so this changes with it.`
+        : `All 256 characters of ${set} — the font decides which character each code is, so this changes with it. F1–F10 pick from the active F-key set (F11/F12 change set; the set shows in the footer while typing).`,
       picker),
     update,
   };
@@ -583,7 +594,7 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
 
   const slider = (label: string, key: keyof ShadeansOptions, min: number, max: number, step: number, fallback: number, title: string, shadeansOnly = false): HTMLElement => {
     let from: Recipe | null = null;
-    const dead = shadeansOnly && convertsWithFont(ed.font);
+    const dead = shadeansOnly && (!!layer.options.ascii || convertsWithFont(ed.font));
     const current = (layer.options[key] as number | undefined) ?? fallback;
     const readout = h("span.muted", {}, String(current));
     const input = h("input", {
@@ -598,8 +609,8 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
     });
     return h(`label.slider${dead ? ".dead" : ""}`, { title: dead ? `${title} — shadeans only, and this font does not use shadeans` : title }, h("span", {}, label), input, readout);
   };
-  const flag = (label: string, key: "truecolor" | "blocks" | "autoLevels", title: string): HTMLElement =>
-    check(label, layer.options[key], title, () => change(label, () => { layer.options[key] = !layer.options[key]; }));
+  const flag = (label: string, key: "truecolor" | "blocks" | "autoLevels" | "ascii", title: string): HTMLElement =>
+    check(label, !!layer.options[key], title, () => change(label, () => { layer.options[key] = !layer.options[key]; }));
 
   // Cutting the background out happens in the source pixels, before shadeans
   // matches them: a cell that straddles the silhouette would otherwise come
@@ -630,8 +641,30 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
     setMatte("Cut out background", { color });
   };
 
-  const tc = layer.options.truecolor, crop = layer.crop;
-  const byFont = convertsWithFont(ed.font);
+  // the document flag settles it for every image in the piece
+  const asciiLocked = !!ed.doc.asciiOnly;
+  const ascii = !!layer.options.ascii || asciiLocked;
+  const contour = ascii ? layer.options.contour : undefined;
+  /** A contour setting, dragged live and committed as one undo step like the others. */
+  const contourSlider = (label: string, key: keyof ContourOptions, min: number, max: number, step: number, title: string): HTMLElement => {
+    let from: Recipe | null = null;
+    const readout = h("span.muted", {}, contour![key].toFixed(2));
+    const input = h("input", {
+      type: "range", min, max, step, value: String(contour![key]), title,
+      oninput: () => {
+        from ??= snapshot();
+        layer.options.contour = { ...layer.options.contour!, [key]: Number(input.value) };
+        readout.textContent = Number(input.value).toFixed(2);
+        void scheduleImageRefresh(ed, layer);
+      },
+      onchange: () => { if (from) { commit(`Contour ${label}`, from); from = null; } },
+    });
+    return h("label.slider", { title }, h("span", {}, label), input, readout);
+  };
+  const tc = layer.options.truecolor && !ascii, crop = layer.crop;
+  // ASCII goes through the font matcher whatever the font is, so everything
+  // that is shadeans' own is out of reach in that mode too
+  const byFont = ascii || convertsWithFont(ed.font);
   let size: { width: number; height: number } | null = null;
   void imageSize(ed.doc, layer.source).then((sz) => { size = sz; });
   const applyCrop = (patch: Partial<NonNullable<ImageLayer["crop"]>>): void => {
@@ -650,12 +683,36 @@ export function imagePanel(ed: Editor, layer: ImageLayer): Panel {
         field("columns", liveNumber(layer.cols, { min: 1, max: 500 }, "Image width", (v) => { layer.cols = v ?? layer.cols; })),
         field("rows", liveNumber(layer.rows || undefined, { min: 1, max: 2000, placeholder: "auto" }, "Image height", (v) => { layer.rows = v ?? 0; })),
         h("button", { title: "Make it as wide as the canvas", onclick: () => change("Fit image to canvas", () => { layer.cols = ed.doc.width; layer.rows = 0; }) }, "fit width")),
-      h("div.row", {},
-        flag("24-bit", "truecolor", "Exact colours per cell instead of the 16-colour palette"),
+      h("div.row.wrap", {},
+        h("label.check", {
+          class: ascii ? "dead" : "", title: ascii ? "ASCII holds one background for the whole picture, which forces the 16 colours" : "Exact colours per cell instead of the 16-colour palette",
+        }, h("input", { type: "checkbox", checked: layer.options.truecolor, disabled: ascii, onchange: () => change("24-bit", () => { layer.options.truecolor = !layer.options.truecolor; }) }), "24-bit"),
         flag("blocks only", "blocks", "Pixel-art baseline: no shade characters"),
-        flag("levels", "autoLevels", "Stretch the source to the full black-to-white range")),
-      byFont && h("p.hint", { title: "shadeans spells cells with CP437's ░▒▓█ and half blocks. This font has no such characters at those codes, so the picture is matched against the shapes it does have." },
-        "Matched against this font's own characters — it has no CP437 shade ramp. Levels, contrast and saturation still apply; texture, coherence, chroma lift, local contrast and smooth are shadeans' own and are greyed out."),
+        flag("levels", "autoLevels", "Stretch the source to the full black-to-white range"),
+        h("label.check", { class: asciiLocked ? "dead" : "", title: asciiLocked ? "This piece is ASCII only, set in the top bar, so every image in it is" : "Draw with printable ASCII 32-126 and nothing else — no blocks, no shade ramp, no line drawing — on one background, the way an ASCII piece is made" },
+          h("input", { type: "checkbox", checked: ascii, disabled: asciiLocked, onchange: () => change("ASCII only", () => { layer.options.ascii = !layer.options.ascii; }) }), "ASCII only")),
+      ascii
+        ? h("div", {},
+          h("p.hint", { title: "Measured in IBM VGA 8x16: the densest printable ASCII character is Q at 39% ink, where CP437's ░▒▓█ run 25/50/75/100%." },
+            "ASCII only. The densest character available is 39% ink against the full block's 100%, so there is no bright end to the range — a picture comes out dark and open, which is the alphabet, not a setting. Contrast and levels are the two worth pushing."),
+          h("div.row", { title: "The one background the whole picture sits on. Black is what ASCII art is; a bright photograph needs a light one, or it saturates into a wall of the densest letters." },
+            h("span.muted", {}, "on"),
+            colorSelect(layer.options.asciiBg ?? 0, [], (v) => change("ASCII background", () => { layer.options.asciiBg = Number(v); })),
+            h("span.muted", {}, (layer.options.asciiBg ?? 0) === 0 ? "light on dark, as ASCII art is" : "dark strokes on a light ground")),
+          h("div.row", { title: "One ink for the whole picture, or a colour per cell taken from the image. With one ink the characters carry the picture by themselves — which is what makes it read as text, and what survives being saved as .txt." },
+            h("span.muted", {}, "ink"),
+            colorSelect(layer.options.asciiInk ?? "image", [["image", "from the image"]],
+              (v) => change("ASCII ink", () => { layer.options.asciiInk = v === "image" ? undefined : Number(v); })),
+            h("span.muted", {}, layer.options.asciiInk === undefined ? "a colour per cell" : "monochrome — the characters do the work")),
+          h("div.row", {},
+            check("contour", !!contour,
+              "Trace the picture's edges as strokes and leave the flat parts empty — what hand-drawn ASCII does — instead of matching tone character by character.",
+              () => change(contour ? "Tone ASCII" : "Contour ASCII", () => { layer.options.contour = contour ? undefined : { ...CONTOUR_DEFAULTS }; })),
+            h("span.muted", {}, contour ? "edges, not tone" : "tone, character by character")),
+          contour && contourSlider("detail", "keep", 0.02, 0.6, 0.02, "How much of the picture is traced: low is a bare outline, high follows every crease"),
+          contour && contourSlider("smooth", "smooth", 0, 6, 0.2, "Blur before the edges are found. Without it a photograph's grain is all edges; raise it to keep only the big shapes"))
+        : byFont && h("p.hint", { title: "shadeans spells cells with CP437's ░▒▓█ and half blocks. This font has no such characters at those codes, so the picture is matched against the shapes it does have." },
+          "Matched against this font's own characters — it has no CP437 shade ramp. Levels, contrast and saturation still apply; texture, coherence, chroma lift, local contrast and smooth are shadeans' own and are greyed out."),
       !tc && slider("texture", "lambda", 0.01, 1, 0.01, 0.1, "How visible dither texture is. 1 = pixel art; lower = more and bolder shading", true),
       !tc && slider("coherence", "coherence", 0, 0.006, 0.0005, 0.002, "Pulls neighbouring cells onto shared colours. 0 = off, 0.006 = flat", true),
       slider("contrast", "contrast", 0.5, 2, 0.05, 1, "Lightness contrast of the source"),

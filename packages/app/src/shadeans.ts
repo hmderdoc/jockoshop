@@ -1,7 +1,7 @@
 import {
   type BitmapFont, type CellGrid, type GlyphInfo, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES,
-  addImageAsset, adjustSource, applyMatte, borderColor, createImageLayer, gridFromShadeans, hasCp437Ramp, matchImageToFont,
-  shadeansOptionBlock,
+  addImageAsset, adjustSource, applyMatte, borderColor, contourAscii, createImageLayer, gridFromShadeans, hasCp437Ramp,
+  isLowAscii, matchImageToFont, shadeansOptionBlock,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 
@@ -129,7 +129,11 @@ export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, view
     const a = sctx.getImageData(0, 0, cols, rows * 2).data;
     coverage = Uint8Array.from({ length: cols * rows * 2 }, (_, i) => a[i * 4 + 3]);
   }
-  if (convertsWithFont(font)) {
+  // ASCII only routes through the matcher whatever the font is: shadeans is
+  // built around CP437's ░▒▓█ and cannot be talked out of them. A document
+  // that says it is ASCII settles it for every image in it.
+  const ascii = !!layer.options.ascii || !!doc.asciiOnly;
+  if (font && (ascii || convertsWithFont(font))) {
     // shadeans does these in the wasm before it matches; this path has to do
     // them itself or the sliders would silently stop working on these fonts
     adjustSource(rgba, crop.width, crop.height, {
@@ -140,9 +144,29 @@ export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, view
       const x = i % cols, y = (i - x) / cols;
       return Math.max(coverage[y * 2 * cols + x], coverage[(y * 2 + 1) * cols + x]);
     });
-    layer.cache = matchImageToFont(rgba, crop.width, crop.height, cols, rows, font, doc.palette, {
-      truecolor: layer.options.truecolor, iceColors: doc.iceColors, coverage: whole,
-    });
+    const opts = {
+      // a fixed background forces the palette path, so 24-bit is not offered
+      // with it; real ASCII art is 16-colour ANSI anyway
+      truecolor: !ascii && layer.options.truecolor, iceColors: doc.iceColors, coverage: whole,
+    };
+    // One background for the whole picture, black unless told otherwise.
+    //
+    // Letting `pickFixedBg` choose it measured wrong: with ASCII capped at 39%
+    // ink a mid-grey is always nearer in squared error than black, so it
+    // answers "light grey" even for a light-on-dark picture — the one case
+    // ASCII art is always in. The convention beats the metric, and the choice
+    // belongs to whoever is looking at the result.
+    const background = layer.options.asciiBg ?? 0;
+    const ink = layer.options.asciiInk;
+    // contour draws the edges instead of the tone, which is what hand-drawn
+    // ASCII does; it has its own alphabet and never asks the tone matcher
+    if (ascii && layer.options.contour) {
+      layer.cache = contourAscii(rgba, crop.width, crop.height, cols, rows, font, doc.palette,
+        { ...layer.options.contour, background, ink, coverage: whole });
+      return;
+    }
+    layer.cache = matchImageToFont(rgba, crop.width, crop.height, cols, rows, font, doc.palette,
+      ascii ? { ...opts, allow: isLowAscii, fixedBg: background, ...(ink === undefined ? {} : { fixedFg: ink }) } : opts);
     return;
   }
   layer.cache = await convertPixels(rgba, crop.width, crop.height, cols, rows, layer.options, doc.iceColors, coverage, glyphs);

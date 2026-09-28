@@ -17,6 +17,8 @@ const ICONS = {
   recent: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3.5 2"/>',
   // collaboration: two people at one canvas
   joint: '<circle cx="8" cy="7.5" r="2.6"/><circle cx="17" cy="8.5" r="2.2"/><path d="M3.5 19c0-3.3 2-5 4.5-5s4.5 1.7 4.5 5"/><path d="M14 19c0-2.6 1.4-4 3-4s3 1.4 3 4"/>',
+  // upload to a board: a cloud with the arrow going up into it
+  cloud: '<path d="M7 18.5a4 4 0 0 1-.3-8 5.5 5.5 0 0 1 10.5 1.2A3.6 3.6 0 0 1 17 18.5z"/><path d="M12 15.5V9"/><path d="M9.5 11.5L12 9l2.5 2.5"/>',
   // depth slider markers
   depthIn: '<path d="M12 4v10"/><path d="M8 10l4 4 4-4"/><path d="M5 19h14"/>',
   depthGlass: '<path d="M12 3v18"/><path d="M8 7l-3 5 3 5M16 7l3 5-3 5" opacity=".5"/>',

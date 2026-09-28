@@ -175,6 +175,18 @@ button.icon.roll { font-size: 15px; line-height: 1; }
 .palette .tool.na:hover { border-color: var(--line); }
 .warn { color: var(--hot); font-size: 11px; }
 
+/* the remote directory in the upload dialog: name | size | when | note */
+.remote-list { height: 176px; overflow-y: auto; border: 1px solid var(--line); border-radius: 4px; margin: 4px 0 2px; }
+.remote-list .hint { margin: 8px; }
+.remote-row { display: grid; grid-template-columns: 1fr 84px 92px auto; gap: 10px; width: 100%; padding: 2px 8px; align-items: baseline; text-align: left; background: none; border: 0; border-radius: 0; }
+.remote-row.plain { cursor: default; }
+/* "../  up" reads as one thing, so it does not use the size/date columns */
+.remote-row.up { grid-template-columns: auto 1fr; }
+button.remote-row:hover:not(:disabled) { background: #2a2d36; border: 0; }
+.remote-row .rn { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trail { margin: 0 0 2px; gap: 2px; }
+.trail button { padding: 1px 5px; }
+
 /* number fields with their own spin buttons */
 .num { display: inline-flex; align-items: stretch; }
 .num input { border-radius: 4px 0 0 4px; -moz-appearance: textfield; appearance: textfield; }

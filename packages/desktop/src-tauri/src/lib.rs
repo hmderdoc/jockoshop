@@ -1,7 +1,10 @@
 //! The desktop shell: a window around the web app, plus what a browser can't
 //! do — read and write files by path, open files from Finder / the command
-//! line, and ask before closing with unsaved changes. File dialogs come from
-//! the dialog plugin; the app itself lives in packages/app.
+//! line, upload to a board over FTP, and ask before closing with unsaved
+//! changes. File dialogs come from the dialog plugin; the app itself lives in
+//! packages/app.
+
+mod remote;
 
 use std::sync::Mutex;
 use tauri::{Emitter, Manager, RunEvent, WindowEvent};
@@ -56,7 +59,10 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(Pending::default())
         .manage(Dirty::default())
-        .invoke_handler(tauri::generate_handler![read_file, write_file, take_pending_files, set_dirty])
+        .invoke_handler(tauri::generate_handler![
+            read_file, write_file, take_pending_files, set_dirty,
+            remote::remote_probe, remote::remote_list, remote::remote_upload,
+        ])
         .setup(|app| {
             // files given on the command line (Windows / Linux; macOS uses the Opened event)
             let args: Vec<String> = std::env::args().skip(1).filter(|a| std::path::Path::new(a).is_file()).collect();

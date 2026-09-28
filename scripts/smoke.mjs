@@ -200,6 +200,17 @@ function png(w, h, pixel) {
 const photo = join(out, "fixture-gradient.png"), disc = join(out, "fixture-disc.png");
 writeFileSync(photo, png(320, 160, (x, y) => [Math.round(255 * x / 319), Math.round(200 * y / 159), Math.round(255 * (1 - x / 319)), 255]));
 writeFileSync(disc, png(200, 200, (x, y) => { const d = Math.hypot(x - 100, y - 100); return [255, Math.round(d * 2), 40, d < 90 ? 255 : 0]; }));
+// Concentric rings of fading contrast, for the contour converter. A gradient
+// has no edges at all, so it is the wrong thing to ask a contour tracer about;
+// and rings of one contrast would not exercise "detail", which chooses how far
+// down the picture's own edge strengths to go and needs a spread to choose from.
+const rings = join(out, "fixture-rings.png");
+writeFileSync(rings, png(320, 320, (x, y) => {
+  const d = Math.hypot(x - 160, y - 160) / 160;
+  const band = Math.floor(d * 14);
+  const v = band % 2 ? 12 : Math.round(12 + 238 * Math.max(0, 1 - band / 14));
+  return [v, v, Math.round(v * 0.6), 255];
+}));
 
 const mod = async (keys, fn) => { for (const k of keys) await page.keyboard.down(k); await fn(); for (const k of [...keys].reverse()) await page.keyboard.up(k); };
 const addImage = async (file) => {
@@ -233,6 +244,100 @@ const tc = await activeCache();
 check("image layer: 24-bit gives exact colours per cell", tc.rgbCells > tc.w * tc.h * 0.9, `${tc.rgbCells} of ${tc.w * tc.h} cells`);
 await shot("08-image-truecolor");
 
+// --- ASCII only: printable 32-126 on one background, whatever the font
+const asciiToggle = () => kd(() => [...document.querySelectorAll("label.check")].find((l) => l.textContent.trim() === "ASCII only").querySelector("input").click());
+await asciiToggle();
+await settle();
+const asciiCells = await kd(() => {
+  const g = window.kd.ed.active.cache;
+  const glyphs = [...g.glyph], bgs = new Set([...g.bg]);
+  return {
+    w: g.width, h: g.height, high: glyphs.filter((c) => c > 126 || c < 32).length,
+    distinct: new Set(glyphs).size, backgrounds: [...bgs],
+    rgbCells: [...g.fg].filter((c) => c >= 0x1000000).length,
+  };
+});
+check("image layer: ASCII only draws nothing outside printable 32-126",
+  asciiCells.high === 0 && asciiCells.distinct > 8, JSON.stringify(asciiCells));
+check("image layer: ASCII only sits on one background, so it cannot be block art in disguise",
+  asciiCells.backgrounds.length === 1 && asciiCells.backgrounds[0] === 0, JSON.stringify(asciiCells.backgrounds));
+check("image layer: 24-bit is off and out of reach in ASCII, which has one background",
+  asciiCells.rgbCells === 0 && await kd(() => [...document.querySelectorAll("label.check")].find((l) => l.textContent.trim() === "24-bit").querySelector("input").disabled));
+// the ground is a choice, because on black a bright picture saturates into a wall of dense letters
+await kd(() => {
+  const sel = [...document.querySelectorAll(".panel select")].find((s) => [...s.options].some((o) => o.textContent === "15 white"));
+  sel.value = "15"; sel.dispatchEvent(new Event("change", { bubbles: true }));
+});
+await settle();
+check("image layer: the ASCII background can be changed, and the whole picture follows",
+  await kd(() => [...new Set([...window.kd.ed.active.cache.bg])].join(",")) === "15",
+  await kd(() => [...new Set([...window.kd.ed.active.cache.bg])].join(",")));
+await shot("08b-image-ascii");
+
+// monochrome: one ink, so the file carries no colour and the characters do the work
+await kd(() => {
+  const sel = [...document.querySelectorAll(".panel select")].find((s) => [...s.options].some((o) => o.textContent === "from the image"));
+  sel.value = "0"; sel.dispatchEvent(new Event("change", { bubbles: true }));
+});
+await settle();
+const mono = await kd(() => {
+  const { ed } = window.kd, g = ed.active.cache, h = ed.font.height;
+  const cover = (c) => { let n = 0; for (let y = 0; y < h; y++) for (let r = ed.font.glyphs[c * h + y]; r; r &= r - 1) n++; return n / (8 * h); };
+  return { fg: [...new Set([...g.fg])], bg: [...new Set([...g.bg])], levels: new Set([...g.glyph].map(cover)).size };
+});
+check("image layer: monochrome uses one ink, so the art carries no colour at all",
+  mono.fg.length === 1 && mono.fg[0] === 0 && mono.bg.length === 1, JSON.stringify(mono));
+check("image layer: monochrome still has a tonal range, carried by the characters",
+  mono.levels > 4, `${mono.levels} distinct ink levels`);
+await shot("08b2-image-mono");
+await kd(() => {
+  const sel = [...document.querySelectorAll(".panel select")].find((s) => [...s.options].some((o) => o.textContent === "from the image"));
+  sel.value = "image"; sel.dispatchEvent(new Event("change", { bubbles: true }));
+});
+await settle();
+
+await settle();
+await asciiToggle();
+await settle();
+check("image layer: turning ASCII off brings the blocks back",
+  await kd(() => [...window.kd.ed.active.cache.glyph].some((c) => c > 126)));
+
+// --- the document-wide ASCII constraint
+const docAscii = () => kd(() => [...document.querySelectorAll(".topbar label.check")].find((l) => l.textContent.trim() === "ASCII").querySelector("input").click());
+await kd(() => { window.kd.ed.chooseTool("brush"); window.kd.ed.setBrush({ glyph: 219 }); });
+// counted on the cells layers' own grids, not the composite: a live image
+// layer re-converts by design when the document turns ASCII, and that is not
+// the same thing as drawn cells being taken away
+const drawnBlocks = () => kd(() => window.kd.ed.doc.layers
+  .filter((l) => l.type === "cells")
+  .reduce((n, l) => n + [...l.grid.glyph].filter((c, i) => l.grid.present[i] && c > 126).length, 0));
+const blocksBefore = await drawnBlocks();
+await docAscii();
+await settle();
+check("ASCII only: the document remembers it", await kd(() => window.kd.ed.doc.asciiOnly === true));
+check("ASCII only: an image layer is put into ASCII and cannot be taken out of it",
+  await kd(() => [...window.kd.ed.doc.layers].some((l) => l.type === "image" && [...l.cache.glyph].every((c) => c >= 32 && c <= 126))));
+await kd(() => window.kd.ed.setBrush({ glyph: 176 }));
+await settle();
+check("ASCII only: the brush refuses a character outside it, and says why",
+  await kd(() => window.kd.ed.glyph) !== 176 && /outside ASCII/.test(await kd(() => window.kd.ed.status)),
+  `glyph ${await kd(() => window.kd.ed.glyph)}; ${await kd(() => window.kd.ed.status)}`);
+await kd(() => window.kd.ed.setBrush({ glyph: 65 }));
+await settle();
+check("ASCII only: a character inside it is still accepted", await kd(() => window.kd.ed.glyph) === 65);
+check("ASCII only: cells already outside it are counted, not changed",
+  /outside ASCII|ASCII ✓/.test(await kd(() => document.querySelector("footer.status").textContent)),
+  await kd(() => document.querySelector("footer.status").textContent.slice(-40)));
+// it is a constraint on what goes in next, never a filter on what is there
+const blocksAfter = await drawnBlocks();
+check("ASCII only: nothing already drawn is removed by turning it on",
+  blocksBefore > 0 && blocksAfter === blocksBefore, `${blocksBefore} drawn block cells before, ${blocksAfter} after`);
+await shot("08d-doc-ascii");
+await docAscii();
+await settle();
+check("ASCII only: turning it off lets the blocks back in",
+  await kd(() => { window.kd.ed.setBrush({ glyph: 176 }); return window.kd.ed.glyph; }) === 176);
+
 await kd(() => { const i = [...document.querySelectorAll(".field")].find((f) => f.textContent.startsWith("columns")).querySelector("input"); i.value = "40"; i.dispatchEvent(new Event("change", { bubbles: true })); });
 await settle();
 const small = await activeCache();
@@ -252,6 +357,45 @@ const imgRoundTrip = await kd(async () => {
   const imgs = back.layers.filter((l) => l.type === "image");
   return { same: core.composite(back, { glyphs: ed.glyphs }).grid.equals(ed.comp.grid), images: imgs.length, recipeKept: imgs[0].cols === 40 && imgs[0].options.truecolor === true, assets: [...back.assets.keys()].filter((k) => k.startsWith("assets/images/")).length };
 });
+
+// contour: trace the edges as strokes and leave the flat parts empty. On its
+// own layer, because the gradient fixture has no edges in it to trace.
+await addImage(rings);
+await kd(() => [...document.querySelectorAll("label.check")].find((l) => l.textContent.trim() === "ASCII only").querySelector("input").click());
+await settle();
+await kd(() => [...document.querySelectorAll("label.check")].find((l) => l.textContent.trim() === "contour").querySelector("input").click());
+await settle();
+const contour = await kd(() => {
+  const g = window.kd.ed.active.cache;
+  const drawn = [...g.present].filter(Boolean).length;
+  const chars = [...new Set([...g.glyph].filter((_, i) => g.present[i]))].map((c) => String.fromCharCode(c)).sort().join("");
+  return { drawn, cells: g.width * g.height, chars };
+});
+// the alphabet is derived from the font by ink coverage, so this asserts the
+// band rather than a list: the dense letters that shade (M, W, Q, @) are the
+// tone matcher's business and must never turn up in a contour
+const contourInk = await kd(() => {
+  const { ed } = window.kd, g = ed.active.cache, h = ed.font.height;
+  const cover = (c) => { let n = 0; for (let y = 0; y < h; y++) for (let r = ed.font.glyphs[c * h + y]; r; r &= r - 1) n++; return n / (8 * h); };
+  const used = [...new Set([...g.glyph].filter((_, i) => g.present[i]))];
+  return { worst: Math.max(...used.map(cover)), lightest: Math.min(...used.map(cover)), ascii: used.every((c) => c >= 32 && c <= 126), n: used.length };
+});
+check("image layer: contour draws only line-like ASCII, never the letters that shade",
+  contourInk.ascii && contourInk.worst <= 0.18 && contourInk.lightest >= 0.03, JSON.stringify(contourInk));
+check("image layer: contour reaches past the six strokes an angle match could offer",
+  contourInk.n > 6 && /[^\-/=\\_|]/.test(contour.chars), JSON.stringify(contour.chars));
+check("image layer: contour leaves the flat parts empty instead of filling them",
+  contour.drawn > 0 && contour.drawn < contour.cells * 0.6, `${contour.drawn} of ${contour.cells} cells drawn`);
+await kd(() => { const s = [...document.querySelectorAll(".slider")].find((l) => l.textContent.startsWith("detail")).querySelector("input"); s.value = "0.5"; s.dispatchEvent(new Event("input", { bubbles: true })); s.dispatchEvent(new Event("change", { bubbles: true })); });
+await settle();
+check("image layer: 'detail' traces more of the picture",
+  await kd(() => [...window.kd.ed.active.cache.present].filter(Boolean).length) > contour.drawn,
+  `${contour.drawn} -> ${await kd(() => [...window.kd.ed.active.cache.present].filter(Boolean).length)}`);
+await shot("08c-image-contour");
+// done with the contour layer; the asset it embedded is why this sits after the
+// project round-trip snapshot above, which counts the images in the document
+await kd(() => { const e = window.kd.ed; e.removeLayer(e.active.id); });
+await settle();
 
 // --- cutting a background out of an image (a subject on a flat, opaque backdrop)
 const SKY = [80, 140, 220];
@@ -1661,6 +1805,107 @@ check("the C64 palette can be put on the document, and it is not VGA's",
   }));
 await kd(() => [...document.querySelectorAll(".backdrop button")].find((b) => b.textContent === "VGA").click());
 await settle();
+await kd(() => document.querySelector(".backdrop").remove());
+
+// --- upload to a board: FTP needs a socket, so a browser must say so rather than fail oddly
+await kd(() => document.querySelector(".backdrop")?.remove());
+await kd(() => [...document.querySelectorAll(".topbar button")].find((x) => (x.getAttribute("aria-label") || "").startsWith("Upload")).click());
+await page.waitForSelector(".backdrop .dialog", { timeout: 5000 });
+check("in a browser the upload dialog says why it cannot connect, instead of failing oddly",
+  await kd(() => {
+    const d = document.querySelector(".backdrop");
+    const send = [...d.querySelectorAll("button")].find((b) => /Upload|Replace/.test(b.textContent));
+    return /cannot open an FTP connection/.test(d.textContent) && send.disabled;
+  }));
+await kd(() => document.querySelector(".backdrop").remove());
+
+// the dialog's own logic, driven against a stub board — the real transport can only refuse here
+const fakeBoard = () => {
+  window.__ftp = { uploads: [], listed: [] };
+  return {
+    available: true,
+    probe: async () => ({ welcome: "220 stub board", path: "/art", secure: false, offersTls: true }),
+    list: async (p, pw, path) => {
+      window.__ftp.listed.push(path);
+      return { path, entries: path === "/art"
+        ? [{ name: "packs", type: "dir" }, { name: "smoke.ans", type: "file", size: 4096 }]
+        : [{ name: "deeper.ans", type: "file", size: 12 }] };
+    },
+    upload: async (p, pw, path, name, bytes, overwrite) => {
+      window.__ftp.uploads.push({ path, name, len: bytes.length, overwrite });
+      // the stub board already holds smoke.ans, and refuses to replace it unasked
+      if (name === "smoke.ans" && !overwrite) return { bytes: undefined, existed: true };
+      return { bytes: bytes.length, existed: name === "smoke.ans" };
+    },
+  };
+};
+await kd((src) => { window.kd.cloud(eval(`(${src})`)()); }, fakeBoard.toString());
+await page.waitForSelector(".backdrop .dialog", { timeout: 5000 });
+const cloud = {
+  fileValue: () => kd(() => document.querySelector(".backdrop .remote-name").value),
+  setFile: (v) => kd((v) => { const i = document.querySelector(".backdrop .remote-name"); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); }, v),
+  status: () => kd(() => document.querySelector(".backdrop .remote-status").textContent ?? ""),
+  rows: () => kd(() => [...document.querySelectorAll(".backdrop .remote-row .rn")].map((s) => s.textContent).join(",")),
+  sendLabel: () => kd(() => [...document.querySelectorAll(".backdrop button")].find((b) => /^(Upload|Replace)$/.test(b.textContent)).textContent),
+  clickSend: () => kd(() => [...document.querySelectorAll(".backdrop button")].find((b) => /^(Upload|Replace)$/.test(b.textContent)).click()),
+};
+check("nothing can be uploaded before a directory has actually been listed",
+  await kd(() => [...document.querySelectorAll(".backdrop button")].find((b) => /^(Upload|Replace)$/.test(b.textContent)).disabled));
+// fill in a board and list it
+await kd(() => {
+  const d = document.querySelector(".backdrop");
+  const set = (ph, v) => { const i = [...d.querySelectorAll("input")].find((x) => x.placeholder === ph); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); };
+  set("bbs.example.org", "bbs.example.org");
+  set("anonymous", "sysop");
+  set("/art", "/art");
+  [...d.querySelectorAll("button")].find((b) => b.textContent === "List").click();
+});
+await settle();
+check("listing a directory shows what is in it, directories first, with a way back up",
+  await cloud.rows() === "../,packs/,smoke.ans", await cloud.rows());
+check("the file name follows the document and format, and .ans is the default",
+  (await cloud.fileValue()).endsWith(".ans"), await cloud.fileValue());
+// aim at the name that is already there: the button must warn instead of silently replacing
+await cloud.setFile("smoke.ans");
+await settle();
+check("a name already on the board turns Upload into Replace, and marks the row",
+  await cloud.sendLabel() === "Replace" && await kd(() => /this upload replaces it/.test(document.querySelector(".backdrop").textContent)));
+// walking into a directory lists it
+await kd(() => [...document.querySelectorAll(".backdrop button.remote-row")].find((b) => b.textContent.startsWith("packs/")).click());
+await settle();
+check("a directory in the listing can be walked into", await kd(() => window.__ftp.listed.includes("/art/packs")),
+  await kd(() => JSON.stringify(window.__ftp.listed)));
+check("the trail shows where we are and can go back", await kd(() => [...document.querySelectorAll(".backdrop .trail button")].map((b) => b.textContent).join("")) === "/artpacks",
+  await kd(() => [...document.querySelectorAll(".backdrop .trail button")].map((b) => b.textContent).join("")));
+// send it, and check the bytes are the export's
+await kd(() => [...document.querySelectorAll(".backdrop .trail button")].find((b) => b.textContent === "art").click());
+await settle();
+await cloud.setFile("fresh.ans");
+await settle();
+await cloud.clickSend();
+await settle();
+check("uploading sends the exported bytes to the listed directory",
+  await kd(() => {
+    const u = window.__ftp.uploads.at(-1);
+    return u && u.path === "/art" && u.name === "fresh.ans" && u.len > 0 && u.overwrite === false;
+  }), await kd(() => JSON.stringify(window.__ftp.uploads.at(-1))));
+check("the status line says what was sent and where", /Sent fresh\.ans/.test(await cloud.status()), await cloud.status());
+// the board refuses to replace smoke.ans unasked; the second press is the confirmation
+await cloud.setFile("smoke.ans");
+await settle();
+await cloud.clickSend();
+await settle();
+check("a name the board already has is not replaced on the first press",
+  await kd(() => window.__ftp.uploads.at(-1).overwrite === false) && /already in/.test(await cloud.status()), await cloud.status());
+await cloud.clickSend();
+await settle();
+check("pressing Replace is what actually overwrites it",
+  await kd(() => window.__ftp.uploads.at(-1).overwrite === true) && /Sent smoke\.ans/.test(await cloud.status()), await cloud.status());
+check("the connection is remembered once something has been sent to it",
+  await kd(() => { try { return (JSON.parse(localStorage.getItem("jockoshop.remotes")).profiles ?? []).some((p) => p.host === "bbs.example.org" && p.dir === "/art"); } catch { return false } }));
+check("a remembered connection carries no password unless asked",
+  await kd(() => { try { return JSON.parse(localStorage.getItem("jockoshop.remotes")).profiles.every((p) => !p.password); } catch { return false } }));
+await shot("cloud-upload");
 await kd(() => document.querySelector(".backdrop").remove());
 
 check("no console errors or page errors", problems.length === 0, problems.slice(0, 3).join(" ; "));

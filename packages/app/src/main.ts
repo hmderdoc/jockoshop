@@ -1,6 +1,6 @@
 import {
   ART_EXTENSIONS, type AspectRatio, C64_PALETTE, VGA_PALETTE, aspectStretch, encodeSeq, isVgaPalette, CP437_UNICODE, type CellsLayer, EMBEDDED_FONT_ASSET, type Layer, addFontAsset, encodeBin, encodeCtrlA, encodeText, encodeTundra, encodeXbin, canvasResizeCommand, planDepth, composite, createCellsLayer, createDocument, createFontLayer, createRaster,
-  deviceShiftPx, documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, parseArt, parseRawFont, refreshFontLayer,
+  deviceShiftPx, documentFromArt, encodeAnsi, encodePng, layerFromArt, loadProject, nonAsciiCells, parseArt, parseRawFont, refreshFontLayer,
   renderDepthView, renderGrid, saveProject, standardFont, stretchRows,
 } from "@killerdraw/core";
 import fontUrl from "../../core/assets/ibmstd.f16?url";
@@ -12,7 +12,9 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
-import { confirmUnsaved, exportDialog, modal, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
+import { cloudDialog } from "./cloud.js";
+import { type ExportFormat, confirmUnsaved, exportDialog, modal, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
+import { type RemoteTransport, remoteTransport } from "./remote.js";
 import { JointClient } from "./joint.js";
 import { jointDialog, jointPanel } from "./jointui.js";
 import { pickBitmapFont } from "./fontpicker.js";
@@ -37,6 +39,8 @@ async function start(): Promise<void> {
   const fonts = new FontStore(font);
   const ed = new Editor(font);
   const io: FileIO = await fileIO();
+  // uploading needs a socket, which only the desktop shell has
+  const remote: RemoteTransport = await remoteTransport();
   const lib = new FontLibrary();
   await lib.load();
   const tools = [...createTools(ed), ...createSelectTools(ed)];
@@ -256,7 +260,12 @@ async function start(): Promise<void> {
     h("label.check", { title: "iCE colours: 16 background colours instead of blink" },
       h("input", { type: "checkbox", checked: ed.doc.iceColors, onchange: () => ed.setProps("iCE colours", ed.doc, { iceColors: !ed.doc.iceColors }, reconvertImages) }), "iCE"),
     h("label.check", { title: "9-pixel cells, as VGA text mode drew them: every cell is a pixel wider, and the 9th column repeats the 8th for the box-drawing and block characters (CP437 192-223) so ─── and ███ join up. Recorded in SAUCE." },
-      h("input", { type: "checkbox", checked: ed.doc.letterSpacing9px, onchange: () => ed.setProps("9px letter spacing", ed.doc, { letterSpacing9px: !ed.doc.letterSpacing9px }) }), "9px"));
+      h("input", { type: "checkbox", checked: ed.doc.letterSpacing9px, onchange: () => ed.setProps("9px letter spacing", ed.doc, { letterSpacing9px: !ed.doc.letterSpacing9px }) }), "9px"),
+    h("label.check", { title: "ASCII only: printable 32-126, no blocks, no shade ramp, no line drawing. A constraint on what goes in next — nothing already drawn is changed, and what is already outside it is counted in the footer so it can be found." },
+      h("input", {
+        type: "checkbox", checked: !!ed.doc.asciiOnly,
+        onchange: () => ed.setProps("ASCII only", ed.doc, { asciiOnly: !ed.doc.asciiOnly }, reconvertImages),
+      }), "ASCII"));
   };
 
   /**
@@ -384,24 +393,30 @@ async function start(): Promise<void> {
   const setPalette = (which: "vga" | "c64"): void => {
     ed.setProps("Palette", ed.doc, { palette: [...(which === "c64" ? C64_PALETTE : VGA_PALETTE)] }, reconvertImages);
   };
-  /** Formats that have something to decide, and what each can carry. */
-  const openExportDialog = (): void => exportDialog(ed, [
+  /**
+   * Formats that have something to decide, and what each can carry. Shared by
+   * Export As… and the upload dialog, so a file sent to a board is the same
+   * bytes as one saved to disk.
+   */
+  const exportFormats = (): ExportFormat[] => [
     { ext: ".ans", label: "ANSI + SAUCE", note: "What almost everything reads. The flags below go in its SAUCE record.",
       can: ["ice", "ninePx", "sauce"],
-      save: (o) => download(`${baseName()}.ans`, encodeAnsi(flat(), { ...exportOpts(), iceColors: o.iceColors, letterSpacing9px: o.ninePx, ...(o.sauce ? {} : { sauce: undefined }) })) },
+      build: (o) => encodeAnsi(flat(), { ...exportOpts(), iceColors: o.iceColors, letterSpacing9px: o.ninePx, ...(o.sauce ? {} : { sauce: undefined }) }) },
     { ext: ".xb", label: "XBin", note: "Carries its own font and palette, which is the reason to choose it — almost every XBIN in the wild does both.",
       can: ["font", "palette", "compress", "ice", "sauce"],
-      save: (o) => download(`${baseName()}.xb`, encodeXbin(flat(), {
+      build: (o) => encodeXbin(flat(), {
         iceColors: o.iceColors, compress: o.compress, sauce: o.sauce ? ed.doc.sauce : false,
         ...(o.embedFont ? { fontBytes: ed.font.glyphs } : {}),
         ...(o.embedPalette ? { palette: ed.doc.palette } : {}),
-      })) },
+      }) },
     { ext: ".seq", label: "PETSCII, for a Commodore", note: "A C64 holds one background colour for the whole screen, so the file cannot change it per cell.",
       can: ["background"],
-      save: (o) => download(`${baseName()}.seq`, encodeSeq(flat(), { background: o.background }).bytes) },
+      build: (o) => encodeSeq(flat(), { background: o.background }).bytes },
     { ext: ".bin", label: "binary text", note: "Raw attribute pairs, even width only.", can: ["ice", "sauce"],
-      save: (o) => download(`${baseName()}.bin`, encodeBin(flat(), { ...exportOpts(), iceColors: o.iceColors })) },
-  ], setPalette);
+      build: (o) => encodeBin(flat(), { ...exportOpts(), iceColors: o.iceColors }) },
+  ];
+  const openExportDialog = (): void => exportDialog(ed, exportFormats(), baseName, setPalette);
+  const openCloud = (): void => cloudDialog(ed, remote, exportFormats(), baseName);
   document.addEventListener("click", () => { exportMenu.hidden = true; });
 
   // recent files (desktop: paths that can be reopened)
@@ -423,6 +438,12 @@ async function start(): Promise<void> {
   const recentBtn = iconButton("recent", "Open recent…", { onclick: (e) => { e.stopPropagation(); recentMenu.hidden = !recentMenu.hidden; } });
   document.addEventListener("click", () => { recentMenu.hidden = true; });
 
+  const cloudBtn = iconButton("cloud", "Upload to a board…", {
+    tip: remote.available
+      ? "send the piece straight to a BBS over FTP (Ctrl/Cmd+Shift+U)"
+      : "needs a socket, so it works in the desktop app",
+    onclick: openCloud,
+  });
   const jointBtn = iconButton("joint", "joint", { tip: "draw together on a Moebius collaboration server (Ctrl/Cmd+J)", onclick: openJoint });
   const mirrorBtn = iconButton("mirror", "Mirror mode (X)", { tip: "every stroke is repeated across the canvas centre; Shift-click for top/bottom", onclick: (e) => toggleMirror(e.shiftKey ? "y" : "x") });
   const toggleMirror = (axis: "x" | "y"): void => {
@@ -439,7 +460,7 @@ async function start(): Promise<void> {
     ...(io.desktop ? [h("span.menu-anchor", {}, recentBtn, recentMenu)] : []),
     iconButton("importLayer", "Import as layer…", { tip: "add an .ans / .bin / .xb on top as a new layer", onclick: () => void importLayer() }),
     iconButton("save", "Save project (Ctrl/Cmd+S)", { tip: io.inPlace ? "in place; Shift-click for Save As" : "downloads a .jock — layers, live text and key rules stay editable", onclick: (e) => void saveProjectFile(e.shiftKey) }),
-    h("span.menu-anchor", {}, exportBtn, exportMenu),
+    h("span.menu-anchor", {}, exportBtn, exportMenu), cloudBtn,
     h("span.sep"), undoBtn, redoBtn, h("span.sep"),
     h("button.ib", { title: "Zoom out", "aria-label": "Zoom out", onclick: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)) }, "−"), zoom,
     h("button.ib", { title: "Zoom in", "aria-label": "Zoom in", onclick: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)) }, "+"),
@@ -501,6 +522,14 @@ async function start(): Promise<void> {
     status.replaceChildren(
       ...(ed.tool === "text" ? [charsetBar(), ed.status && h("span.muted.beside", {}, ed.status)] : [h("span", {}, ed.status || hint)]).filter((n): n is HTMLElement => !!n),
       h("span.grow"),
+      // an ASCII piece that already holds blocks says so, and where the first one is
+      ...(ed.doc.asciiOnly ? [(() => {
+        const { count, at } = nonAsciiCells(ed.comp.grid, 1);
+        return count
+          ? h("span.warn", { title: `First at ${at[0].x + 1},${at[0].y + 1}. They were drawn before this piece was set to ASCII, or came in with an imported layer — nothing has been changed or removed.` },
+            `${count} cell${count === 1 ? "" : "s"} outside ASCII`)
+          : h("span.muted", { title: "Every drawn cell is printable ASCII 32-126" }, "ASCII ✓");
+      })()] : []),
       ...(joint.connected ? [h("span.muted", { title: `${joint.url} — ${joint.sentDraws} cells sent, ${joint.receivedDraws} received` }, `joint ${joint.path} · ${joint.users.length + 1} here`)] : []),
       h("span.muted", {}, where));
   };
@@ -541,6 +570,7 @@ async function start(): Promise<void> {
     { combo: "mod+s", label: "Save", group: "File", run: () => void saveProjectFile(false) },
     { combo: "mod+shift+s", label: "Save As…", group: "File", run: () => void saveProjectFile(true) },
     { combo: "mod+j", label: "Joint (collaborate)…", group: "File", run: () => openJoint() },
+    { combo: "mod+shift+u", label: "Upload to a board…", group: "File", when: () => remote.available, run: () => openCloud() },
     { combo: "mod+i", label: "SAUCE info…", group: "File", moebius: true, run: () => sauceDialog(ed) },
     { combo: "mod+alt+c", label: "Canvas size…", group: "File", moebius: true, run: () => canvasDialog() },
 
@@ -654,7 +684,7 @@ async function start(): Promise<void> {
     await buildMenu({
       newDocument, open: openFile, importLayer, save: () => saveProjectFile(), saveAs: () => saveProjectFile(true),
       exportAns: () => download(`${baseName()}.ans`, encodeAnsi(flat(), exportOpts())), exportPng, exportWiggle, export3d,
-      exportMore: openExportDialog,
+      exportMore: openExportDialog, upload: openCloud,
       undo: () => ed.undo(), redo: () => ed.redo(),
       selectAll: () => selectAll(ed), selectNone: () => selectNone(ed), selectInverse: () => selectInverse(ed),
       copy: () => void copySelection(ed), cut: () => cutSelection(ed), paste: () => paste(ed), deleteSel: () => deleteSelection(ed),
@@ -663,7 +693,12 @@ async function start(): Promise<void> {
       joint: openJoint, shortcuts: () => shortcutSheet(bindings),
     });
   }
-  (window as unknown as { kd: unknown }).kd = { ed, tools, view, lib, io, joint };
+  // `cloud` takes a transport so the smoke suite can drive the dialog against a
+  // stub: a browser has no FTP, so the real one can only refuse
+  (window as unknown as { kd: unknown }).kd = {
+    ed, tools, view, lib, io, joint, remote,
+    cloud: (t: RemoteTransport = remote) => cloudDialog(ed, t, exportFormats(), baseName),
+  };
 
   // the web app works offline once visited, and can be installed (see public/sw.js and manifest.webmanifest);
   // the dev server and the Tauri shell have no use for the worker

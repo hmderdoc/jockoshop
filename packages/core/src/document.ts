@@ -1,6 +1,7 @@
 import { type Color, type Rgb, VGA_PALETTE } from "./color.js";
 import { CellGrid } from "./grid.js";
 import type { AspectRatio } from "./formats/sauce.js";
+import type { ContourOptions } from "./contour.js";
 import type { ImageMatte } from "./matte.js";
 import type { CellMatch } from "./match.js";
 import type { Sauce } from "./formats/sauce.js";
@@ -104,6 +105,34 @@ export interface ShadeansOptions {
   lambda: number;
   /** pixel-art baseline: no shade characters */
   blocks: boolean;
+  /**
+   * ASCII only: match against printable 32-126 and nothing else, on one
+   * background for the whole picture. Not a shadeans setting — shadeans is
+   * built around CP437's ░▒▓█, so this routes the layer through the font
+   * matcher instead, whatever font the document is in.
+   */
+  ascii?: boolean;
+  /**
+   * The one background an ASCII picture sits on; undefined = black, which is
+   * what ASCII art is. It is worth choosing rather than assuming: printable
+   * ASCII reaches only 39% ink, so on black a bright photograph has nowhere to
+   * go and comes back as a solid wall of the densest letters. Putting it on a
+   * light ground turns the same picture into dark strokes on white.
+   */
+  asciiBg?: number;
+  /**
+   * One ink for the whole picture; undefined = take each cell's colour from
+   * the image. Set, the characters carry the picture by themselves, which is
+   * what a plain-text piece is — and what survives being saved as `.txt` or
+   * pasted somewhere with no colour at all.
+   */
+  asciiInk?: number;
+  /**
+   * Draw the picture's edges as strokes instead of matching its tone — what
+   * hand-drawn ASCII actually does. Set = on; see ContourOptions. Only means
+   * anything with `ascii`, since the stroke alphabet is ASCII.
+   */
+  contour?: ContourOptions;
   /** pulls neighbouring cells onto shared colours (0 = off, 0.006 = flat) */
   coherence: number;
   sweeps: number;
@@ -213,6 +242,16 @@ export interface KdDocument {
   /** on: background 8-15 is a bright colour. off: it means blink. */
   iceColors: boolean;
   letterSpacing9px: boolean;
+  /**
+   * The piece is ASCII: printable 32-126 only, no blocks, no shade ramp, no
+   * line drawing. Optional so projects written before it still open.
+   *
+   * It is a constraint, not a filter — nothing already drawn is altered or
+   * thrown away. It keeps the characters out of the places new ones come from,
+   * counts whatever is already outside it so it can be found, and puts image
+   * layers into ASCII mode.
+   */
+  asciiOnly?: boolean;
   /**
    * What the art's pixels were meant to be shaped like, as SAUCE records it.
    * "stretch" = drawn for a 4:3 CRT, so it wants stretching vertically to look
