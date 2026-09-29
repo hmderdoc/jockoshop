@@ -237,7 +237,7 @@ export function buildRight(ed: Editor, view: CanvasView, lib: FontLibrary): HTML
           onclick: async () => {
             const layer = createImageLayer(r.name.replace(/^ref: /, ""), r.source, r.width);
             layer.x = r.x; layer.y = r.y; layer.rows = r.height;
-            try { await refreshImageLayer(ed.doc, layer); } catch (err) { ed.setStatus(`Could not convert: ${(err as Error).message}`); return; }
+            try { await refreshImageLayer(ed.doc, layer, ed); } catch (err) { ed.setStatus(`Could not convert: ${(err as Error).message}`); return; }
             const at = ed.locate(r.id)!;
             ed.run({ label: "Reference to image layer", redo: () => { at.list[at.list.indexOf(r)] = layer; ed.activeId = layer.id; }, undo: () => { at.list[at.list.indexOf(layer)] = r; ed.activeId = r.id; } });
           },

@@ -7,7 +7,7 @@ import type { Editor } from "./editor.js";
 import { type Binding, comboLabel } from "./keymap.js";
 import { C64_PALETTE, commonestBackground, encodeSeq, isVgaPalette } from "@killerdraw/core";
 import { colorName } from "./ui.js";
-import { convertPixels } from "./shadeans.js";
+import { asciiLayer, convertPixels, rematchCells } from "./shadeans.js";
 import { download, field, h, numberInput } from "./ui.js";
 
 /** A dialog box over a backdrop that closes on a click outside it. Returns the backdrop, to `remove()`. */
@@ -111,7 +111,8 @@ export function scaleDialog(ed: Editor, layer: CellsLayer): void {
         const sx = Math.min(g.width - 1, Math.floor((x + 0.5) * g.width / w)), sy = Math.min(g.height - 1, Math.floor((y + 0.5) * g.height / hgt));
         coverage[y * w + x] = g.present[g.index(sx, sy)] ? 255 : 0;
       }
-      try { next = await convertPixels(raster.data, raster.width, raster.height, w, hgt, { ...SHADEANS_DEFAULTS, truecolor: false }, ed.doc.iceColors, coverage); }
+      // an ASCII piece is re-matched in ASCII; shadeans would give back blocks
+      try { next = await rematchCells(ed, raster.data, raster.width, raster.height, w, hgt, { coverage, ascii: asciiLayer(ed.doc, layer) }); }
       catch (err) { status.textContent = `Could not re-match: ${(err as Error).message}`; return; }
     }
     const before = layer.grid, after = next;

@@ -397,6 +397,61 @@ await shot("08c-image-contour");
 await kd(() => { const e = window.kd.ed; e.removeLayer(e.active.id); });
 await settle();
 
+// --- ASCII beside CP437 in one piece
+// An ASCII conversion has to survive being one element of a larger ANSI
+// drawing: the constraint belongs to the layer, not to the canvas.
+const mixed = await kd(async () => {
+  const sh = await import("/src/shadeans.ts");
+  const { ed } = window.kd;
+  const imgs = ed.doc.layers.filter((l) => l.type === "image");
+  if (imgs.length < 2) return { error: `needs two image layers, found ${imgs.length}` };
+  imgs[0].options.ascii = true;
+  imgs[1].options.ascii = false;
+  await sh.refreshImageLayer(ed.doc, imgs[0], ed);
+  await sh.refreshImageLayer(ed.doc, imgs[1], ed);
+  ed.recomposite();
+  const count = (g, pick) => [...g.glyph].filter((c, i) => g.present[i] && pick(c)).length;
+  const high = (g) => count(g, (c) => c > 126);
+  const low = (g) => count(g, (c) => c >= 32 && c <= 126);
+  return {
+    asciiHigh: high(imgs[0].cache), asciiLow: low(imgs[0].cache),
+    cp437High: high(imgs[1].cache),
+    compHigh: high(ed.comp.grid), compLow: low(ed.comp.grid),
+  };
+});
+check("an ASCII layer and a CP437 layer convert independently in one document",
+  !mixed.error && mixed.asciiHigh === 0 && mixed.asciiLow > 0 && mixed.cp437High > 0, JSON.stringify(mixed));
+check("the flattened piece carries both — ASCII art inside ANSI art",
+  !mixed.error && mixed.compHigh > 0 && mixed.compLow > 0, JSON.stringify(mixed));
+
+// the same, through the opacity path, which re-matches cells after the fact
+await kd(() => {
+  const { ed } = window.kd;
+  const imgs = ed.doc.layers.filter((l) => l.type === "image");
+  imgs[0].opacity = 0.6;
+  ed.recomposite();
+});
+await settle();
+const faded = await kd(() => {
+  const { ed } = window.kd, imgs = ed.doc.layers.filter((l) => l.type === "image");
+  const me = ed.comp.layers.indexOf(imgs[0]);
+  let owned = 0, blocks = 0;
+  for (let i = 0; i < ed.comp.grid.glyph.length; i++) {
+    if (ed.comp.owner[i] !== me || !ed.comp.grid.present[i]) continue;
+    owned++;
+    if (ed.comp.grid.glyph[i] > 126) blocks++;
+  }
+  return { owned, blocks };
+});
+check("a translucent ASCII layer is still ASCII once blended, not re-matched into blocks",
+  faded.owned > 0 && faded.blocks === 0, JSON.stringify(faded));
+await kd(() => {
+  const { ed } = window.kd;
+  ed.doc.layers.filter((l) => l.type === "image").forEach((l) => { l.opacity = undefined; l.options.ascii = false; });
+  ed.recomposite();
+});
+await settle();
+
 // --- cutting a background out of an image (a subject on a flat, opaque backdrop)
 const SKY = [80, 140, 220];
 const ball = join(out, "fixture-ball.png");

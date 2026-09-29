@@ -7,10 +7,10 @@
  * The layer's own cells are untouched — only the flattened picture changes.
  */
 import {
-  type ContentLayer, type KdDocument, SHADEANS_DEFAULTS, composite, createRaster, isRgb, renderGrid, visibleLayers,
+  type ContentLayer, type KdDocument, composite, createRaster, isRgb, renderGrid, visibleLayers,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
-import { convertPixels } from "./shadeans.js";
+import { asciiLayer, rematchCells } from "./shadeans.js";
 
 export function translucentLayers(doc: KdDocument): ContentLayer[] {
   return visibleLayers(doc.layers).filter((l) => l.opacity !== undefined && l.opacity < 1);
@@ -55,7 +55,13 @@ export async function applyOpacity(ed: Editor): Promise<boolean> {
         for (let k = 0; k < 3; k++) rO.data[o + k] = Math.round(rU.data[o + k] * (1 - a) + rO.data[o + k] * a);
       }
     }
-    const matched = await convertPixels(rO.data, rO.width, rO.height, W, H, { ...SHADEANS_DEFAULTS, truecolor }, doc.iceColors);
+    // an ASCII layer stays ASCII through the blend: handing this to shadeans
+    // would spell it back in CP437 blocks and quietly undo the conversion
+    const opts2 = (L as { options?: { asciiBg?: number; asciiInk?: number } }).options;
+    const matched = await rematchCells(ed, rO.data, rO.width, rO.height, W, H, {
+      truecolor, ascii: asciiLayer(doc, L as Parameters<typeof asciiLayer>[1]),
+      asciiBg: opts2?.asciiBg, asciiInk: opts2?.asciiInk,
+    });
     // into the live composite, where this layer is still what shows
     for (let i = 0; i < W * H; i++) {
       if (!mask[i] || full.layers[full.owner[i]] !== L) continue;

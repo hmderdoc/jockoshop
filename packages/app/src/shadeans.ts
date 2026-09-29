@@ -1,5 +1,5 @@
 import {
-  type BitmapFont, type CellGrid, type GlyphInfo, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES,
+  type BitmapFont, type CellGrid, type GlyphInfo, type ImageLayer, type KdDocument, SHADEANS_CELL_BYTES, SHADEANS_DEFAULTS, type ShadeansOptions,
   addImageAsset, adjustSource, applyMatte, borderColor, contourAscii, createImageLayer, gridFromShadeans, hasCp437Ramp,
   isLowAscii, matchImageToFont, shadeansOptionBlock,
 } from "@killerdraw/core";
@@ -170,6 +170,43 @@ export async function refreshImageLayer(doc: KdDocument, layer: ImageLayer, view
     return;
   }
   layer.cache = await convertPixels(rgba, crop.width, crop.height, cols, rows, layer.options, doc.iceColors, coverage, glyphs);
+}
+
+/**
+ * Whether a layer's cells have to be ASCII: because the whole piece is, or
+ * because that layer was converted that way.
+ */
+export function asciiLayer(doc: KdDocument, layer?: { type: string; options?: ShadeansOptions }): boolean {
+  return !!doc.asciiOnly || (layer?.type === "image" && !!layer.options?.ascii);
+}
+
+/**
+ * Re-match an already-rendered picture back into cells.
+ *
+ * Cells get regenerated after the fact in a few places — blending a
+ * translucent layer, scaling by re-match — and all of them used to hand the
+ * work to shadeans, which spells cells with CP437's ░▒▓█. Done to an ASCII
+ * layer that is the end of it: the piece silently becomes block art, and the
+ * reason a converted ASCII element can live inside a larger ANSI piece is that
+ * nothing does that to it.
+ *
+ * Contour is not re-run here. It reads edges out of the source image, and what
+ * these callers have is a picture of characters — tracing that would find the
+ * outlines of the letters. An ASCII tone match is the honest fallback.
+ */
+export async function rematchCells(
+  ed: { doc: KdDocument } & FontView, rgba: Uint8ClampedArray, width: number, height: number,
+  cols: number, rows: number,
+  opts: { truecolor?: boolean; coverage?: Uint8Array; ascii?: boolean; asciiBg?: number; asciiInk?: number } = {},
+): Promise<CellGrid> {
+  if (opts.ascii && ed.font) {
+    return matchImageToFont(rgba, width, height, cols, rows, ed.font, ed.doc.palette, {
+      allow: isLowAscii, fixedBg: opts.asciiBg ?? 0, iceColors: ed.doc.iceColors, coverage: opts.coverage,
+      ...(opts.asciiInk === undefined ? {} : { fixedFg: opts.asciiInk }),
+    });
+  }
+  return convertPixels(rgba, width, height, cols, rows,
+    { ...SHADEANS_DEFAULTS, truecolor: !!opts.truecolor }, ed.doc.iceColors, opts.coverage, ed.glyphs);
 }
 
 const jobs = new WeakMap<ImageLayer, { again: boolean }>();
