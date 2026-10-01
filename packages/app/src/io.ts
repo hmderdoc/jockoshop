@@ -34,6 +34,22 @@ export interface FileIO {
   setTitle(title: string): void;
 }
 
+/**
+ * Open a link where links belong — the real browser.
+ *
+ * In the desktop shell an anchor would navigate the app's own webview to the
+ * page, leaving the editor gone and no way back; the shell hands it to the OS
+ * instead. In a browser it is an ordinary new tab.
+ */
+export async function openExternal(url: string): Promise<void> {
+  if ("__TAURI_INTERNALS__" in window) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("open_url", { url });
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 let browserDirty = false;
 
 const browserIO: FileIO = {

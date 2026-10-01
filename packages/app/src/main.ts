@@ -12,6 +12,7 @@ import { CHARSETS, CHARSET_NAMES } from "./charsets.js";
 import { iconButton } from "./icons.js";
 import { type FileIO, type Picked, fileIO } from "./io.js";
 import { buildMenu } from "./menu.js";
+import { aboutDialog, appMark, buildLabel } from "./about.js";
 import { cloudDialog } from "./cloud.js";
 import { type ExportFormat, confirmUnsaved, exportDialog, modal, sauceDialog, shortcutSheet, wiggleDialog } from "./dialogs.js";
 import { type RemoteTransport, remoteTransport } from "./remote.js";
@@ -454,7 +455,7 @@ async function start(): Promise<void> {
   };
 
   const topbar = h("header.topbar", {},
-    h("strong.logo", {}, "jockoshop"),
+    h("button.logo", { title: `jockoshop ${buildLabel()} — about, and where to get a newer build`, "aria-label": "About jockoshop", onclick: () => aboutDialog() }, appMark(22)),
     iconButton("new", "New document", { onclick: () => void newDocument() }),
     iconButton("open", "Open…", { tip: "a .jock project, or an .ans / .bin / .xb as a new document (drop a file on the window to add it as a layer instead)", onclick: () => void openFile() }),
     ...(io.desktop ? [h("span.menu-anchor", {}, recentBtn, recentMenu)] : []),

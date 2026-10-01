@@ -29,7 +29,16 @@ h4:first-child { margin-top: 0; }
 
 .topbar { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .topbar .row { margin: 0; align-items: center; }
-.logo { color: var(--hot); margin-right: 8px; letter-spacing: .04em; }
+/* the app's own mark, which opens the About box */
+.logo { display: inline-flex; align-items: center; margin-right: 6px; padding: 2px; background: none; border: 1px solid transparent; border-radius: 6px; }
+.logo:hover:not(:disabled) { border-color: var(--line); background: #2a2d36; }
+.logo svg { display: block; border-radius: 5px; }
+
+.about-head { display: flex; gap: 12px; align-items: center; margin-bottom: 10px; }
+.about-head svg { border-radius: 13px; flex: none; }
+.about-links { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0 4px; }
+.linkish { display: inline-flex; gap: 8px; align-items: baseline; }
+.linkish:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
 .title { color: var(--muted); }
 .status { display: flex; gap: 12px; padding: 4px 10px; background: var(--panel); border-top: 1px solid var(--line); min-height: 25px; }
 

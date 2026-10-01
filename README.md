@@ -3,8 +3,9 @@
 A layered, non-destructive ANSI art editor. *(Package names inside the repo are still `killerdraw`, the working title.)*
 
 **Downloads:** [Releases](https://github.com/hmderdoc/jockoshop/releases) — macOS (Apple silicon and Intel), Windows and Linux.
-The builds are **not code-signed**. On macOS the first launch says "unidentified developer": right-click
-`jockoshop.app` → **Open** (or `xattr -d com.apple.quarantine jockoshop.app`). Windows SmartScreen: "More info" → "Run anyway".
+**macOS builds are signed and notarized**, so they open normally. Releases up to and including v0.1.11 were not —
+for those, right-click `jockoshop.app` → **Open** (or `xattr -d com.apple.quarantine jockoshop.app`).
+**Windows and Linux builds are still unsigned**: SmartScreen shows "More info" → "Run anyway".
 
 The project file keeps the recipe
 for a picture (hand-drawn cells, live TheDraw text, source images plus their
@@ -94,6 +95,7 @@ what is missing.
 - **3dBBS files reopen in 3D**: an exported `.ans` with depth tags opens as one layer per depth plane, each with its depth set.
 - **SAUCE editor**: title, author, group, date, comments, font name, 9-px flag.
 - **Recent files** (desktop): the clock icon next to Open.
+- **The mark in the corner** opens an About box: what the app is, the version and the commit it was built from (with a `+` when the build had uncommitted changes, so a local build never claims to be the release it was built beside), and links to the repository and the release builds. The links open in the real browser — in the desktop shell an anchor would navigate the app's own webview to the page and leave no way back. The icon itself is `docs/icon.svg`, drawn as vector in the top bar so it stays crisp, and `docs/icon.png` is the 1024px raster the installers are built from (`npm run icon`).
 - **Files**: `.jock` project (ZIP: manifest, layer data, masks, original assets, flattened `preview.ans`). Projects saved as `.kdraw` by earlier builds still open.
   **Open** makes a new document from a file; **drop** a file on the window and it is added to the current document as a layer instead (art lands where you dropped it; a dropped `.jock` opens as the document).
   Open / import: ANS (16-colour, iCE, 24-bit), BIN, XBIN, TundraDraw `.tnd`, Synchronet Ctrl-A `.msg`, Artworx `.adf`, iCE Draw `.idf`, Avatar `.avt`, plain text.
@@ -158,6 +160,23 @@ browser can't do: files with paths (Save saves in place, Shift-click / Cmd+Shift
 **uploading to a board over FTP** (a browser may not open a socket), and an "unsaved changes" prompt on close.
 Fonts and `shadeans.wasm` are compiled into the binary, so run
 `npm run fonts` and `npm run shadeans` before building.
+
+**Signing macOS releases** is done in CI, not locally, from six repository secrets. Without them the workflow still
+builds — every variable is empty and Tauri simply does not sign — so forks and local builds are unaffected:
+
+| secret | value |
+|---|---|
+| `APPLE_CERTIFICATE` | base64 of a **Developer ID Application** `.p12` (`base64 -i cert.p12 \| tr -d '\n'`) |
+| `APPLE_CERTIFICATE_PASSWORD` | the password the `.p12` was exported with |
+| `APPLE_SIGNING_IDENTITY` | e.g. `Developer ID Application: Name (TEAMID)`, from `security find-identity -v -p codesigning` |
+| `APPLE_ID` | the Apple account's email |
+| `APPLE_PASSWORD` | an [app-specific password](https://support.apple.com/HT204397) — the account password is rejected |
+| `APPLE_TEAM_ID` | the team the certificate belongs to |
+
+The certificate must be **Developer ID Application**. An "Apple Distribution" certificate is for the App Store and
+will not do, and the private key has to be on the machine that exports the `.p12` — easiest if the signing request
+was generated there. The release notes say whether a build is signed, keyed on whether the secrets exist, so they
+cannot claim more than was done.
 
 The `.dmg` is made with plain `hdiutil` (`scripts/make-dmg.sh`) rather than Tauri's DMG step, which scripts Finder
 to arrange the window and so triggers a macOS "control Finder" permission prompt.

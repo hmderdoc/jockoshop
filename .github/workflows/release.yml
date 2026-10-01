@@ -66,11 +66,22 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # macOS signing and notarization. Every one of these is the empty
+          # string when the secret is not set, and Tauri then simply does not
+          # sign — so a fork, or this repo before the secrets existed, still
+          # builds. The Windows and Linux jobs ignore them.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: packages/desktop
           tagName: ${{ github.ref_name }}
           releaseName: jockoshop ${{ github.ref_name }}
-          releaseBody: Unsigned builds. macOS shows "unidentified developer" the first time — right-click the app and choose Open.
+          # tells the truth either way, so the notes cannot outlive the secrets
+          releaseBody: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'macOS builds are signed and notarized, so they open normally. Windows and Linux builds are unsigned — SmartScreen warns; choose More info, then Run anyway.' || 'Unsigned builds. macOS shows an unidentified developer warning the first time — right-click the app and choose Open.' }}
           prerelease: true
           includeUpdaterJson: false
           args: ${{ matrix.args }}

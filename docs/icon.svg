@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+<defs>
+<linearGradient id="jbg" x1="0" y1="0" x2="0.4" y2="1"><stop offset="0" stop-color="#1B1E27"/><stop offset="1" stop-color="#0B0D12"/></linearGradient>
+<linearGradient id="jsheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".10"/><stop offset=".5" stop-color="#fff" stop-opacity="0"/></linearGradient>
+<clipPath id="jclip"><rect width="1024" height="1024" rx="228"/></clipPath>
+</defs>
+<g clip-path="url(#jclip)">
+<rect width="1024" height="1024" fill="url(#jbg)"/>
+<path d="M560 430 V 700 A 150 150 0 0 1 410 850 H 370" stroke="#F4F1EA" stroke-width="128" fill="none" stroke-linecap="round"/>
+<rect x="496" y="170" width="128" height="176" rx="22" fill="#FFB020"/>
+<rect x="496" y="170" width="128" height="176" rx="22" fill="none"/>
+<rect width="1024" height="1024" fill="url(#jsheen)"/>
+</g></svg>

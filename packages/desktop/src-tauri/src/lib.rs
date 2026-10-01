@@ -27,6 +27,40 @@ fn write_file(path: String, data: Vec<u8>) -> Result<(), String> {
     std::fs::rename(&tmp, &path).map_err(|e| format!("{path}: {e}"))
 }
 
+/// Open a link in the real browser.
+///
+/// A plain anchor would navigate the app's own webview to the page and leave
+/// the editor with no way back. Only http(s) is allowed through, and the URL is
+/// passed as one argument to a program that is not a shell — so even though
+/// every caller is a constant in the app today, nothing here can be talked into
+/// running a command.
+#[tauri::command]
+fn open_url(url: String) -> Result<(), String> {
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(format!("refusing to open {url}: only http and https"));
+    }
+    #[cfg(target_os = "macos")]
+    let mut cmd = {
+        let mut c = std::process::Command::new("open");
+        c.arg(&url);
+        c
+    };
+    #[cfg(target_os = "windows")]
+    let mut cmd = {
+        // rundll32 rather than `cmd /c start`, which would put the URL through a shell
+        let mut c = std::process::Command::new("rundll32.exe");
+        c.args(["url.dll,FileProtocolHandler", &url]);
+        c
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut cmd = {
+        let mut c = std::process::Command::new("xdg-open");
+        c.arg(&url);
+        c
+    };
+    cmd.spawn().map(|_| ()).map_err(|e| format!("could not open {url}: {e}"))
+}
+
 /// The webview calls this once it is listening, and gets whatever arrived earlier.
 #[tauri::command]
 fn take_pending_files(state: tauri::State<'_, Pending>) -> Vec<String> {
@@ -60,7 +94,7 @@ pub fn run() {
         .manage(Pending::default())
         .manage(Dirty::default())
         .invoke_handler(tauri::generate_handler![
-            read_file, write_file, take_pending_files, set_dirty,
+            read_file, write_file, take_pending_files, set_dirty, open_url,
             remote::remote_probe, remote::remote_list, remote::remote_upload,
         ])
         .setup(|app| {

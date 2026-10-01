@@ -930,7 +930,8 @@ const exportsOk = await kd(async () => {
   return results;
 });
 check("all export formats encode and read back at the right width", Object.values(exportsOk).every((v) => v === "ok"), JSON.stringify(exportsOk));
-check("the app is called jockoshop", await kd(() => document.querySelector(".logo").textContent === "jockoshop" && document.title.includes("jockoshop")));
+// the name moved out of the corner and into the mark's label and the title bar
+check("the app is called jockoshop", await kd(() => document.querySelector(".logo").getAttribute("aria-label").includes("jockoshop") && document.title.includes("jockoshop")));
 check("3dBBS export reports its depth layers", (await kd(() => window.kd.ed.status)).startsWith("Exported with 3 depth layer"), await kd(() => window.kd.ed.status));
 
 // the tool decides the left sidebar
@@ -1961,6 +1962,33 @@ check("the connection is remembered once something has been sent to it",
 check("a remembered connection carries no password unless asked",
   await kd(() => { try { return JSON.parse(localStorage.getItem("jockoshop.remotes")).profiles.every((p) => !p.password); } catch { return false } }));
 await shot("cloud-upload");
+await kd(() => document.querySelector(".backdrop").remove());
+
+// --- the mark in the corner, and the About box behind it
+await kd(() => document.querySelector(".backdrop")?.remove());
+const mark = await kd(() => {
+  const b = document.querySelector(".topbar button.logo");
+  const svg = b?.querySelector("svg");
+  return { there: !!b, label: b?.getAttribute("aria-label") ?? "", vector: svg?.tagName === "svg", noText: (b?.textContent ?? "").trim() === "" };
+});
+check("the top-left is the app's own mark, drawn as vector, not the old word",
+  mark.there && mark.vector && mark.noText && /About/.test(mark.label), JSON.stringify(mark));
+await kd(() => document.querySelector(".topbar button.logo").click());
+await page.waitForSelector(".backdrop .dialog", { timeout: 5000 });
+const about = await kd(() => {
+  const d = document.querySelector(".backdrop");
+  const links = [...d.querySelectorAll("button.linkish")].map((b) => b.title);
+  return { text: d.textContent, links, version: /Version\s+([0-9]+\.[0-9]+\.[0-9]+)/.exec(d.textContent)?.[1] ?? "" };
+});
+check("About names the build, with a real version rather than a placeholder",
+  /^\d+\.\d+\.\d+$/.test(about.version) && /built \d{4}-\d{2}-\d{2}/.test(about.text), JSON.stringify({ version: about.version }));
+check("About links to the repository and to the release builds",
+  about.links.some((u) => /github\.com\/hmderdoc\/jockoshop$/.test(u)) && about.links.some((u) => /\/releases$/.test(u)),
+  JSON.stringify(about.links));
+// a webview has nowhere to put a page, so these must not be plain anchors
+check("the links are not anchors that would navigate the app away",
+  await kd(() => !document.querySelector(".backdrop a[href^='http']")));
+await shot("30-about");
 await kd(() => document.querySelector(".backdrop").remove());
 
 check("no console errors or page errors", problems.length === 0, problems.slice(0, 3).join(" ; "));
