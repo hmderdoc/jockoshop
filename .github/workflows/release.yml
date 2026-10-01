@@ -73,15 +73,21 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # Notarization is off until the Apple ID credentials are sorted out:
+          # Apple answers 401 to them, and because notarizing comes after
+          # signing, a failure there loses the macOS builds entirely rather
+          # than just leaving them unnotarized. Signing above still happens.
+          # To turn it back on, set the repository variable NOTARIZE_MACOS to
+          # "true" — no code change needed.
+          APPLE_ID: ${{ vars.NOTARIZE_MACOS == 'true' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ vars.NOTARIZE_MACOS == 'true' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ vars.NOTARIZE_MACOS == 'true' && secrets.APPLE_TEAM_ID || '' }}
         with:
           projectPath: packages/desktop
           tagName: ${{ github.ref_name }}
           releaseName: jockoshop ${{ github.ref_name }}
-          # tells the truth either way, so the notes cannot outlive the secrets
-          releaseBody: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'macOS builds are signed and notarized, so they open normally. Windows and Linux builds are unsigned — SmartScreen warns; choose More info, then Run anyway.' || 'Unsigned builds. macOS shows an unidentified developer warning the first time — right-click the app and choose Open.' }}
+          # tells the truth about each state, so the notes cannot outlive the setup
+          releaseBody: ${{ vars.NOTARIZE_MACOS == 'true' && 'macOS builds are signed and notarized, so they open normally. Windows and Linux builds are unsigned — SmartScreen warns; choose More info, then Run anyway.' || (secrets.APPLE_SIGNING_IDENTITY != '' && 'macOS builds are signed but not yet notarized, so macOS still warns the first time — right-click the app and choose Open. Windows and Linux builds are unsigned.' || 'Unsigned builds. macOS shows an unidentified developer warning the first time — right-click the app and choose Open.') }}
           prerelease: true
           includeUpdaterJson: false
           args: ${{ matrix.args }}
