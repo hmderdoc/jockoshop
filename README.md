@@ -3,10 +3,10 @@
 A layered, non-destructive ANSI art editor. *(Package names inside the repo are still `killerdraw`, the working title.)*
 
 **Downloads:** [Releases](https://github.com/hmderdoc/jockoshop/releases) — macOS (Apple silicon and Intel), Windows and Linux.
-**macOS builds are signed** with a Developer ID certificate but **not yet notarized**, so macOS still warns the first
-time: right-click `jockoshop.app` → **Open** (or `xattr -d com.apple.quarantine jockoshop.app`). Notarization is wired
-up and switched off — Apple rejects the credentials with a 401, so it is parked rather than losing the macOS builds to
-it. **Windows and Linux builds are unsigned**: SmartScreen shows "More info" → "Run anyway".
+**macOS builds are signed and notarized**, so they open normally — verified on the downloaded `.dmg` with
+`spctl` (accepted, "Notarized Developer ID") and `stapler validate`. Releases up to v0.1.14 were not: for those,
+right-click `jockoshop.app` → **Open** (or `xattr -d com.apple.quarantine jockoshop.app`).
+**Windows and Linux builds are unsigned**: SmartScreen shows "More info" → "Run anyway".
 
 The project file keeps the recipe
 for a picture (hand-drawn cells, live TheDraw text, source images plus their
