@@ -66,28 +66,32 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # macOS signing and notarization. Every one of these is the empty
-          # string when the secret is not set, and Tauri then simply does not
-          # sign — so a fork, or this repo before the secrets existed, still
-          # builds. The Windows and Linux jobs ignore them.
+          # macOS signing. These are the empty string when the secret is not
+          # set, and tauri-action skips importing a certificate then — so a
+          # fork, or this repo before the secrets existed, still builds
+          # unsigned. The Windows and Linux jobs ignore them.
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
           # Notarization is off until the Apple ID credentials are sorted out:
-          # Apple answers 401 to them, and because notarizing comes after
-          # signing, a failure there loses the macOS builds entirely rather
-          # than just leaving them unnotarized. Signing above still happens.
-          # To turn it back on, set the repository variable NOTARIZE_MACOS to
-          # "true" — no code change needed.
-          APPLE_ID: ${{ vars.NOTARIZE_MACOS == 'true' && secrets.APPLE_ID || '' }}
-          APPLE_PASSWORD: ${{ vars.NOTARIZE_MACOS == 'true' && secrets.APPLE_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ vars.NOTARIZE_MACOS == 'true' && secrets.APPLE_TEAM_ID || '' }}
+          # Apple answers 401 to them, and notarizing runs after signing, so a
+          # failure there loses the macOS builds entirely rather than leaving
+          # them merely unnotarized. Signing above still happens.
+          #
+          # The three variables are commented out rather than set empty, which
+          # was tried and does not work: Tauri tests whether APPLE_ID is
+          # *present*, and an empty string is present, so it went on to notarize
+          # and then failed with "Team ID must be at least 3 characters".
+          # Uncomment all three to turn it back on; the secrets are already set.
+          # APPLE_ID: ${{ secrets.APPLE_ID }}
+          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           projectPath: packages/desktop
           tagName: ${{ github.ref_name }}
           releaseName: jockoshop ${{ github.ref_name }}
           # tells the truth about each state, so the notes cannot outlive the setup
-          releaseBody: ${{ vars.NOTARIZE_MACOS == 'true' && 'macOS builds are signed and notarized, so they open normally. Windows and Linux builds are unsigned — SmartScreen warns; choose More info, then Run anyway.' || (secrets.APPLE_SIGNING_IDENTITY != '' && 'macOS builds are signed but not yet notarized, so macOS still warns the first time — right-click the app and choose Open. Windows and Linux builds are unsigned.' || 'Unsigned builds. macOS shows an unidentified developer warning the first time — right-click the app and choose Open.') }}
+          releaseBody: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'macOS builds are signed but not yet notarized, so macOS still warns the first time — right-click the app and choose Open. Windows and Linux builds are unsigned.' || 'Unsigned builds. macOS shows an unidentified developer warning the first time — right-click the app and choose Open.' }}
           prerelease: true
           includeUpdaterJson: false
           args: ${{ matrix.args }}
