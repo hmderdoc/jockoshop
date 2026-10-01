@@ -63,6 +63,42 @@ jobs:
       - name: shadeans to WebAssembly
         run: node scripts/build-shadeans.mjs
 
+      # Apple's notary service answered 401 to credentials that work verbatim
+      # from a terminal, which leaves the secret's own bytes as the difference:
+      # a value pasted into the GitHub UI very often carries a trailing
+      # newline, and it is invisible there and masked in the logs. None of
+      # these three can legitimately contain whitespace — an email address, a
+      # 16-character app-specific password, a team ID — so they are trimmed
+      # here rather than trusted to arrive clean. The byte counts say whether
+      # it mattered without revealing anything: a count that shrinks is the
+      # answer.
+      #
+      # Writing them to GITHUB_ENV rather than the step's `env:` also keeps
+      # them genuinely absent when they are not set. Tauri asks whether
+      # APPLE_ID is *present*, and an empty string is present — that mistake
+      # cost 0.1.13 its macOS builds.
+      - name: Notarization credentials
+        if: startsWith(matrix.os, 'macos')
+        env:
+          RAW_APPLE_ID: ${{ secrets.APPLE_ID }}
+          RAW_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          RAW_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          trim() { printf %s "$1" | tr -d '[:space:]'; }
+          count() { printf %s "$1" | wc -c | tr -d ' '; }
+          id=$(trim "$RAW_APPLE_ID")
+          pw=$(trim "$RAW_APPLE_PASSWORD")
+          team=$(trim "$RAW_APPLE_TEAM_ID")
+          echo "APPLE_ID       $(count "$RAW_APPLE_ID") bytes raw, $(count "$id") trimmed"
+          echo "APPLE_PASSWORD $(count "$RAW_APPLE_PASSWORD") bytes raw, $(count "$pw") trimmed"
+          echo "APPLE_TEAM_ID  $(count "$RAW_APPLE_TEAM_ID") bytes raw, $(count "$team") trimmed"
+          if [ -n "$id" ] && [ -n "$pw" ] && [ -n "$team" ]; then
+            { echo "APPLE_ID=$id"; echo "APPLE_PASSWORD=$pw"; echo "APPLE_TEAM_ID=$team"; } >> "$GITHUB_ENV"
+            echo "notarization on"
+          else
+            echo "notarization credentials absent, skipping it"
+          fi
+
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -73,19 +109,10 @@ jobs:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          # Notarization is off until the Apple ID credentials are sorted out:
-          # Apple answers 401 to them, and notarizing runs after signing, so a
-          # failure there loses the macOS builds entirely rather than leaving
-          # them merely unnotarized. Signing above still happens.
-          #
-          # The three variables are commented out rather than set empty, which
-          # was tried and does not work: Tauri tests whether APPLE_ID is
-          # *present*, and an empty string is present, so it went on to notarize
-          # and then failed with "Team ID must be at least 3 characters".
-          # Uncomment all three to turn it back on; the secrets are already set.
-          # APPLE_ID: ${{ secrets.APPLE_ID }}
-          # APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          # APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # APPLE_ID, APPLE_PASSWORD and APPLE_TEAM_ID are not listed here: the
+          # step above puts them in the environment, trimmed, and only when all
+          # three are set. Listing them here would define them as empty strings
+          # when the secrets are absent, which Tauri reads as present.
         with:
           projectPath: packages/desktop
           tagName: ${{ github.ref_name }}
