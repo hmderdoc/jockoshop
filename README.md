@@ -162,6 +162,12 @@ browser can't do: files with paths (Save saves in place, Shift-click / Cmd+Shift
 Fonts and `shadeans.wasm` are compiled into the binary, so run
 `npm run fonts` and `npm run shadeans` before building.
 
+**The app icon** is `docs/icon.svg`; `npm run icon` rasterizes it with the headless Chrome the smoke tests use and
+regenerates every platform's icons, so there is no hand-exported PNG that nobody can reproduce. macOS gets its own
+raster: a Mac icon is expected to sit in a margin — measured against Calculator, Mail and Notes, the artwork is about
+81% of the canvas with ~100px clear on each side — and full-bleed artwork is a quarter larger than everything beside it
+in the dock. Windows and Linux expect no such inset and keep the full-bleed version.
+
 **Signing macOS releases** is done in CI, not locally, from six repository secrets. Without them the workflow still
 builds — every variable is empty and Tauri simply does not sign — so forks and local builds are unaffected:
 
