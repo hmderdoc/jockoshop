@@ -425,6 +425,10 @@ async function start(): Promise<void> {
     { ext: ".ans", label: "ANSI + SAUCE", note: "What almost everything reads. The flags below go in its SAUCE record.",
       can: ["ice", "ninePx", "sauce"],
       build: (o) => encodeAnsi(flat(), { ...exportOpts(), iceColors: o.iceColors, letterSpacing9px: o.ninePx, ...(o.sauce ? {} : { sauce: undefined }) }) },
+    // its own entry, keyed by its own suffix: both dialogs pick a format by `ext`
+    { ext: "-3d.ans", label: "3dBBS ANSI, with depth layers", note: "The .ans above plus CSI = … z depth tags for 3dBBS; other terminals ignore them and show it flat.",
+      can: ["ice", "ninePx", "sauce"],
+      build: (o) => encodeAnsi(flat(), { ...exportOpts(), iceColors: o.iceColors, letterSpacing9px: o.ninePx, ...(o.sauce ? {} : { sauce: undefined }), depth: planDepth(ed.comp) }) },
     { ext: ".xb", label: "XBin", note: "Carries its own font and palette, which is the reason to choose it — almost every XBIN in the wild does both.",
       can: ["font", "palette", "compress", "ice", "sauce"],
       build: (o) => encodeXbin(flat(), {
