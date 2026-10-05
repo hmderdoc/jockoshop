@@ -1769,7 +1769,7 @@ dependencies = [
 
 [[package]]
 name = "jockoshop"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "clipboard-rs",
  "objc2-app-kit",
