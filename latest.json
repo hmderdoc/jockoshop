@@ -1,0 +1,23 @@
+{
+  "version": "0.1.17",
+  "notes": "Upload to a board and Export As… can now send the 3dBBS .ans with its depth layers (the new -3d.ans format). Before, an uploaded .ans was always flat.",
+  "pub_date": "2026-10-05T22:15:38Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbGlNZGhUZXhSUFFnaXQxTUxzRFBkNjV6bWJmVzhhYm55UWdRa29oTzFUeVNGNW1YZk1LZ1B5S2REc29yWHpUTTQwN21xSTJRV3JFQktTUWNlbjNWTk40Q0U3cHRNTVFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMjM5MDE2CWZpbGU6am9ja29zaG9wLmFwcC50YXIuZ3oJdmVyc2lvbjowLjEuMTcKYnZaTC9za0l0bURpNElsZWViNm9qUDJQZE0wTHFuUEJRNWpZTUsxQ2JEU1ZGYXR2WlFTRUxsM0dPZG1TV3JJVllwc0NPQmV6SUVCU3Z0amlnQTZmQ2c9PQo=",
+      "url": "https://github.com/hmderdoc/jockoshop/releases/download/v0.1.17/jockoshop_aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbGlNZGhUZXhSUGQzUlYraHhXSXB0UzBUbHVvdm9qV2VIVDYxK0M0OWxrSzBIdFlTdnJxQzBtU09LbGNkNG5iZElOMU8yRTJ6K3pFY3RYV0NrenZFWlRkNFdzaDJndXdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMjM4OTU4CWZpbGU6am9ja29zaG9wLmFwcC50YXIuZ3oJdmVyc2lvbjowLjEuMTcKQm16Zm9mU2lob0lRTmhxMVBGNDZ4dU5sZTMvaHlzZm5OV3ozU3N5bzkwNEJUTGdkdVh1bER1bmx1bDBPWkZuSWNBWnlFUTlCZnlCd2haakZpdEQyQWc9PQo=",
+      "url": "https://github.com/hmderdoc/jockoshop/releases/download/v0.1.17/jockoshop_x64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbGlNZGhUZXhSUFhxekE3ODQ3V1QydG9xY1dJNDhmQTJsQXE4aUwrekNIYlY5eUhJcTh5UGl4RTFIQzI5QmMrUzhXbFJ2dkxiQlY2NjZvU1B0SE1RZ0hSNFdCaGtDaGd3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMjM5MDU0CWZpbGU6am9ja29zaG9wXzAuMS4xN194NjQtc2V0dXAuZXhlCXZlcnNpb246MC4xLjE3Ck40cEVGYTJBeUZ3b3BWYytGVFRCSUNnTnF5R1lKY3ZyNFl0ZUpGZHpJTldaN2k0Snl6NXlMZkRmNWFEaENIVUtlTlFCTlgxZmxGNkdiaTZPMm85TEJBPT0K",
+      "url": "https://github.com/hmderdoc/jockoshop/releases/download/v0.1.17/jockoshop_0.1.17_x64-setup.exe"
+    },
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUbGlNZGhUZXhSUFdLQktlNjJvS2pyYTd0Y0dPZmxUV3RGVGJTZDRmRFZWQkozQ2VIY2tVcjZaMjcwTUY3Nnl2cVBjN1EwbC8yZXNvWkl2MkFvMDU0cXF1VDB3aDZLM0FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMjM4OTI3CWZpbGU6am9ja29zaG9wXzAuMS4xN19hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjAuMS4xNwpkQzNGaXpqZUZBbzd6ald1akFHZVA4K2FoRHdLbTJiNkI3T0tvaDFMUDVQYnZXSmdrWVY3bEZJRW41M3VrTTE5M3JpM0FZYUJRaktHRi9GZHBxSERDQT09Cg==",
+      "url": "https://github.com/hmderdoc/jockoshop/releases/download/v0.1.17/jockoshop_0.1.17_amd64.AppImage"
+    }
+  }
+}
