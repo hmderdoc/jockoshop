@@ -6,7 +6,7 @@ export interface MenuActions {
   selectAll(): void; selectNone(): void; selectInverse(): void;
   copy(): void; cut(): void; paste(): void; deleteSel(): void;
   zoomIn(): void; zoomOut(): void; zoomFit(): void; canvasSize(): void; sauce(): void; mirror(): void;
-  shortcuts(): void;
+  shortcuts(): void; checkUpdates(): void;
 }
 
 export async function buildMenu(a: MenuActions): Promise<void> {
@@ -14,7 +14,8 @@ export async function buildMenu(a: MenuActions): Promise<void> {
   const item = (text: string, action: () => void, accelerator?: string) => MenuItem.new({ text, action, accelerator });
   const sep = () => PredefinedMenuItem.new({ item: "Separator" });
   const app = await Submenu.new({ text: "jockoshop", items: [
-    await PredefinedMenuItem.new({ item: { About: { name: "jockoshop" } } }), await sep(),
+    await PredefinedMenuItem.new({ item: { About: { name: "jockoshop" } } }),
+    await item("Check for Updates…", a.checkUpdates), await sep(),
     await PredefinedMenuItem.new({ item: "Hide" }), await PredefinedMenuItem.new({ item: "HideOthers" }), await sep(),
     await PredefinedMenuItem.new({ item: "Quit" }),
   ] });
@@ -53,6 +54,19 @@ export async function buildMenu(a: MenuActions): Promise<void> {
     await item("Mirror Mode", a.mirror, "CmdOrCtrl+Alt+M"), await sep(),
     await item("Keyboard Shortcuts", a.shortcuts),
   ] });
-  const menu = await Menu.new({ items: [app, file, edit, view] });
+  const window = await Submenu.new({ text: "Window", items: [
+    await PredefinedMenuItem.new({ item: "Minimize" }),
+    await PredefinedMenuItem.new({ item: "Maximize" }), await sep(),
+    await PredefinedMenuItem.new({ item: "BringAllToFront" }),
+  ] });
+  const menu = await Menu.new({ items: [app, file, edit, view, window] });
+  // macOS lists the open windows under this one by itself
+  await window.setAsWindowsMenuForNSApp().catch(() => { /* not macOS */ });
   await menu.setAsAppMenu();
+  // There is one menu bar and every window builds its own, whose items call into that
+  // window's document: the window in front puts its own up.
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  await getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    if (focused) void menu.setAsAppMenu().then(() => window.setAsWindowsMenuForNSApp()).catch(() => { /* not macOS */ });
+  });
 }

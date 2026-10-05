@@ -39,6 +39,7 @@ export * from "./formats/tundra.js";
 export * from "./formats/seq.js";
 export * from "./formats/ctrla.js";
 export * from "./formats/text.js";
+export * from "./clipboard.js";
 export * from "./formats/legacy.js";
 export * from "./joint/types.js";
 export * from "./joint/protocol.js";

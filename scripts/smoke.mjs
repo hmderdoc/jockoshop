@@ -845,10 +845,23 @@ await kd(() => { const e = window.kd.ed; e.activeId = e.doc.layers[3].id; e.glyp
 await drag([30, 21], [35, 23]);
 await clickButton("fill", ".toolbox");
 check("fill paints the selection with the brush", (await cell(32, 22)).glyph === 177 && (await cell(32, 22)).fg === 10 && (await cell(36, 22)).glyph !== 177);
+// a stand-in for the desktop's system clipboard: it keeps what copy writes and hands it back to paste
+await kd(() => { const board = window.kdBoard = { p: {} }; window.kd.ed.systemClipboard = { write: async (p) => { board.p = p; }, read: async () => board.p }; });
 await mod(["Meta"], () => page.keyboard.press("c"));
+const wrote = await kd(() => { const p = window.kdBoard.p; return { custom: Object.keys(p.custom ?? {}), html: (p.html ?? "").slice(0, 60), text: p.text }; });
+check("copy puts ours, PabloDraw's, Moebius's and plain text on the system clipboard",
+  wrote.custom.join() === "org.hmderdoc.jockoshop.cells,pablo" && wrote.html.startsWith(`<meta charset='utf-8'>{"columns":6,"rows":3`) && wrote.text === "▒▒▒▒▒▒\r\n▒▒▒▒▒▒\r\n▒▒▒▒▒▒", JSON.stringify(wrote));
 await mod(["Meta"], () => page.keyboard.press("v"));
 const pasted = await kd(() => { const e = window.kd.ed, l = e.active; return { name: l.name, x: l.x, y: l.y, w: l.grid.width, h: l.grid.height, tool: e.tool, sel: !!e.selection }; });
 check("copy + paste lands as a new layer in place, ready to move", pasted.name === "Pasted" && pasted.x === 30 && pasted.y === 21 && pasted.w === 6 && pasted.h === 3 && pasted.tool === "move" && !pasted.sel, JSON.stringify(pasted));
+// what Moebius leaves on the clipboard: blocks as JSON in the HTML slot, nothing about where they came from
+await kd(() => { window.kdBoard.p = { text: "AB", html: `<meta charset='utf-8'>{"columns":2,"rows":1,"data":[{"code":65,"fg":14,"bg":1},{"code":219,"fg":4,"bg":0}]}` }; });
+await mod(["Meta"], () => page.keyboard.press("v"));
+const fromMoebius = await kd(() => { const e = window.kd.ed, l = e.active, g = l.grid, c = e.pasteCentre(); return { w: g.width, h: g.height, x: l.x, y: l.y, cx: c?.x, cy: c?.y, cells: [0, 1].map((i) => [g.glyph[i], g.fg[i], g.bg[i], g.present[i]]) }; });
+check("a Moebius copy pastes as a layer, centred in the view", fromMoebius.w === 2 && fromMoebius.h === 1 && fromMoebius.x === Math.max(0, fromMoebius.cx - 1) && fromMoebius.y === fromMoebius.cy
+  && JSON.stringify(fromMoebius.cells) === "[[65,14,1,7],[219,4,0,7]]", JSON.stringify(fromMoebius));
+await mod(["Meta"], () => page.keyboard.press("z"));
+await kd(() => { window.kd.ed.systemClipboard = null; });
 
 // non-destructive mask from a selection, on the live text layer
 await kd(() => { const e = window.kd.ed; e.activeId = e.doc.layers[2].id; e.tool = "marquee"; e.emit("doc"); });

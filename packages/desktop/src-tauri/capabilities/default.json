@@ -3,13 +3,14 @@
   "identifier": "default",
   "description": "enables the default permissions",
   "windows": [
-    "main"
+    "*"
   ],
   "permissions": [
     "core:default",
     "core:window:allow-destroy",
     "core:window:allow-set-title",
     "core:webview:allow-internal-toggle-devtools",
-    "dialog:default"
+    "dialog:default",
+    "updater:default"
   ]
 }

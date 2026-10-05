@@ -1,17 +1,33 @@
-//! The desktop shell: a window around the web app, plus what a browser can't
-//! do — read and write files by path, open files from Finder / the command
-//! line, upload to a board over FTP, and ask before closing with unsaved
-//! changes. File dialogs come from the dialog plugin; the app itself lives in
-//! packages/app.
+//! The desktop shell: a window per document around the web app, plus what a
+//! browser can't do — read and write files by path, open files from Finder /
+//! the command line, the system clipboard in other editors' formats, upload
+//! to a board over FTP, and ask before closing with unsaved changes. File
+//! dialogs come from the dialog plugin, updates from the updater plugin (signed;
+//! the feed is latest.json on the update-feed branch, written by the release
+//! workflow); the app itself lives in packages/app.
 
+mod clip;
 mod remote;
 
+use std::collections::{HashMap, HashSet};
 use std::sync::Mutex;
-use tauri::{Emitter, Manager, RunEvent, WindowEvent};
+use tauri::{Emitter, Manager, RunEvent, WebviewWindowBuilder, WindowEvent};
 
-/// Files the OS asked us to open before the webview was ready to hear about it.
+/// What the shell knows about each window, by label.
 #[derive(Default)]
-struct Pending(Mutex<Vec<String>>);
+struct Windows(Mutex<WindowsState>);
+
+#[derive(Default)]
+struct WindowsState {
+    /// files a window is to open, waiting until its webview asks for them
+    pending: HashMap<String, Vec<String>>,
+    /// windows with unsaved changes
+    dirty: HashSet<String>,
+    /// windows still showing an untouched document, which a file can be opened into
+    /// instead of a new window. A window is taken off the moment a file is queued for it.
+    busy: HashSet<String>,
+    next: u32,
+}
 
 #[tauri::command]
 fn read_file(path: String) -> Result<Vec<u8>, String> {
@@ -61,40 +77,121 @@ fn open_url(url: String) -> Result<(), String> {
     cmd.spawn().map(|_| ()).map_err(|e| format!("could not open {url}: {e}"))
 }
 
-/// The webview calls this once it is listening, and gets whatever arrived earlier.
+/// A window's webview calls this once it is listening, and gets the files queued for it.
 #[tauri::command]
-fn take_pending_files(state: tauri::State<'_, Pending>) -> Vec<String> {
-    eprintln!("jockoshop: webview connected");
-    std::mem::take(&mut *state.0.lock().unwrap())
+fn take_pending_files(window: tauri::Window, state: tauri::State<'_, Windows>) -> Vec<String> {
+    eprintln!("jockoshop: {} connected", window.label());
+    state.0.lock().unwrap().pending.remove(window.label()).unwrap_or_default()
 }
 
-/// Told by the webview whether the document has unsaved changes.
+/// Told by a window whether its document has unsaved changes, and whether it is
+/// untouched (nothing opened into it, nothing drawn) so a file may replace it.
 #[tauri::command]
-fn set_dirty(state: tauri::State<'_, Dirty>, dirty: bool) {
-    *state.0.lock().unwrap() = dirty;
+fn set_doc_state(window: tauri::Window, state: tauri::State<'_, Windows>, dirty: bool, untouched: bool) {
+    let label = window.label().to_string();
+    let mut s = state.0.lock().unwrap();
+    if dirty { s.dirty.insert(label.clone()); } else { s.dirty.remove(&label); }
+    // a window still to open its queued files is not free, whatever it says before it has asked for them
+    if untouched && !s.pending.contains_key(&label) { s.busy.remove(&label); } else { s.busy.insert(label); }
 }
 
-#[derive(Default)]
-struct Dirty(Mutex<bool>);
+/// Whether any window has unsaved changes: an update is not installed over them.
+#[tauri::command]
+fn unsaved_windows(state: tauri::State<'_, Windows>) -> usize {
+    state.0.lock().unwrap().dirty.len()
+}
 
-/// Queue files to open and nudge the webview. It drains the queue with
-/// `take_pending_files`, on the nudge or when it starts — whichever comes first.
-fn open_paths(app: &tauri::AppHandle, paths: Vec<String>) {
+/// Restart into the version just installed — unless a window has gained unsaved
+/// changes since the app last looked, in which case nothing happens (false) and
+/// the new version starts next time.
+#[tauri::command]
+fn restart_if_saved(app: tauri::AppHandle, state: tauri::State<'_, Windows>) -> bool {
+    if !state.0.lock().unwrap().dirty.is_empty() {
+        return false;
+    }
+    app.restart()
+}
+
+/// A new window for a new document, or one per file to open.
+///
+/// Async so the window is not built while the main thread waits on this call
+/// (that deadlocks on Windows).
+#[tauri::command]
+async fn open_window(app: tauri::AppHandle, paths: Vec<String>) -> Result<(), String> {
+    if paths.is_empty() {
+        return new_window(&app, Vec::new()).map_err(|e| e.to_string());
+    }
+    for p in paths {
+        new_window(&app, vec![p]).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// Build a window like the first one in tauri.conf.json, a step down and right
+/// of the window in front, and queue `paths` for it to open.
+fn new_window(app: &tauri::AppHandle, paths: Vec<String>) -> tauri::Result<()> {
+    let label = {
+        let state = app.state::<Windows>();
+        let mut s = state.0.lock().unwrap();
+        s.next += 1;
+        let label = format!("doc{}", s.next);
+        s.busy.insert(label.clone());
+        if !paths.is_empty() { s.pending.insert(label.clone(), paths); }
+        label
+    };
+    let mut conf = app.config().app.windows.first().cloned().unwrap_or_default();
+    conf.label = label;
+    let front = app.webview_windows().into_values().find(|w| w.is_focused().unwrap_or(false));
+    let window = WebviewWindowBuilder::from_config(app, &conf)?.build()?;
+    if let Some(front) = front {
+        if let (Ok(pos), Ok(scale)) = (front.outer_position(), front.scale_factor()) {
+            let step = (28.0 * scale) as i32;
+            let _ = window.set_position(tauri::PhysicalPosition::new(pos.x + step, pos.y + step));
+        }
+    }
+    Ok(())
+}
+
+/// Files from Finder or the command line: into a window with an untouched
+/// document if there is one, else each into a window of its own. A window drains
+/// its queue with `take_pending_files`, on the nudge or when it starts —
+/// whichever comes first.
+fn open_paths(app: &tauri::AppHandle, mut paths: Vec<String>) {
     if paths.is_empty() {
         return;
     }
-    app.state::<Pending>().0.lock().unwrap().extend(paths);
-    let _ = app.emit("open-files", ());
+    let reuse = {
+        let state = app.state::<Windows>();
+        let mut s = state.0.lock().unwrap();
+        let mut labels: Vec<String> = app.webview_windows().into_keys().collect();
+        labels.sort();
+        let free = labels.into_iter().find(|l| !s.busy.contains(l));
+        free.map(|label| {
+            s.busy.insert(label.clone());
+            s.pending.entry(label.clone()).or_default().push(paths.remove(0));
+            label
+        })
+    };
+    if let Some(label) = reuse {
+        let _ = app.emit_to(label.as_str(), "open-files", ());
+    }
+    for p in paths {
+        if let Err(e) = new_window(app, vec![p]) {
+            eprintln!("jockoshop: could not open a window: {e}");
+        }
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(Pending::default())
-        .manage(Dirty::default())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(Windows::default())
         .invoke_handler(tauri::generate_handler![
-            read_file, write_file, take_pending_files, set_dirty, open_url,
+            read_file, write_file, take_pending_files, set_doc_state, open_window, open_url,
+            unsaved_windows, restart_if_saved,
+            clip::clipboard_write, clip::clipboard_read,
             remote::remote_probe, remote::remote_list, remote::remote_upload,
         ])
         .setup(|app| {
@@ -104,11 +201,23 @@ pub fn run() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let WindowEvent::CloseRequested { api, .. } = event {
-                if *window.state::<Dirty>().0.lock().unwrap() {
-                    api.prevent_close();
-                    let _ = window.emit("close-requested", ());   // the app asks, then calls window.destroy()
+            match event {
+                WindowEvent::CloseRequested { api, .. } => {
+                    if window.state::<Windows>().0.lock().unwrap().dirty.contains(window.label()) {
+                        api.prevent_close();
+                        // the app asks, then calls window.destroy()
+                        let _ = window.emit_to(window.label(), "close-requested", ());
+                    }
                 }
+                WindowEvent::Destroyed => {
+                    let state = window.state::<Windows>();
+                    let mut s = state.0.lock().unwrap();
+                    let label = window.label();
+                    s.pending.remove(label);
+                    s.dirty.remove(label);
+                    s.busy.remove(label);
+                }
+                _ => {}
             }
         })
         .build(tauri::generate_context!())

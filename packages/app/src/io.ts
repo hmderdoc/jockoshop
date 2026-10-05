@@ -6,6 +6,7 @@
  * handles, so save writes in place there too, and as an installed PWA the OS
  * hands us files through the launch queue.
  */
+import type { ClipPayload } from "@killerdraw/core";
 import { download, pickFile } from "./ui.js";
 
 export interface Picked {
@@ -30,8 +31,17 @@ export interface FileIO {
   onOpenRequest(fn: (files: Picked[], at?: { x: number; y: number }) => void): void;
   /** the OS wants the window closed while there are unsaved changes; `fn` decides */
   onCloseRequest(fn: () => Promise<boolean>): void;
-  setDirty(dirty: boolean): void;
+  /** `untouched`: nothing drawn or opened yet, so a file the OS opens may land here rather than in a new window */
+  setDocState(dirty: boolean, untouched: boolean): void;
   setTitle(title: string): void;
+  /** desktop: a new window, opening each of `paths` in a window of its own (none: one window, new document) */
+  openWindow?(paths: string[]): Promise<void>;
+  /** desktop: the system clipboard, including the types a webview cannot reach */
+  clipboard?: {
+    write(p: ClipPayload): Promise<void>;
+    /** text, HTML, and whichever of the `custom` types are there */
+    read(custom: string[]): Promise<ClipPayload>;
+  };
 }
 
 /**
@@ -75,7 +85,7 @@ const browserIO: FileIO = {
     // a browser only lets us ask its own generic question
     window.addEventListener("beforeunload", (e) => { if (browserDirty) e.preventDefault(); });
   },
-  setDirty(dirty) { browserDirty = dirty; },
+  setDocState(dirty) { browserDirty = dirty; },
   setTitle(title) { document.title = title; },
 };
 
@@ -177,14 +187,14 @@ function fsAccessIO(fs: FSWindow): FileIO {
     onCloseRequest() {
       window.addEventListener("beforeunload", (e) => { if (browserDirty) e.preventDefault(); });
     },
-    setDirty(dirty) { browserDirty = dirty; },
+    setDocState(dirty) { browserDirty = dirty; },
     setTitle(title) { document.title = title; },
   };
 }
 
 async function tauriIO(): Promise<FileIO> {
-  const [{ invoke }, { listen }, { open, save }, { getCurrentWindow }] = await Promise.all([
-    import("@tauri-apps/api/core"), import("@tauri-apps/api/event"), import("@tauri-apps/plugin-dialog"), import("@tauri-apps/api/window"),
+  const [{ invoke }, { open, save }, { getCurrentWindow }] = await Promise.all([
+    import("@tauri-apps/api/core"), import("@tauri-apps/plugin-dialog"), import("@tauri-apps/api/window"),
   ]);
   const baseName = (p: string): string => p.replace(/^.*[\\/]/, "");
   const readPath = async (path: string): Promise<Picked> => ({ name: baseName(path), path, bytes: new Uint8Array(await invoke<number[]>("read_file", { path })) });
@@ -216,7 +226,8 @@ async function tauriIO(): Promise<FileIO> {
         }
         if (files.length) fn(files);
       };
-      void listen("open-files", drain);
+      // this window's own: every window has a queue in the shell
+      void getCurrentWindow().listen("open-files", drain);
       void getCurrentWindow().onDragDropEvent(async (e) => {
         if (e.payload.type !== "drop" || !e.payload.paths.length) return;
         // the position is in physical pixels of the window; the webview fills it
@@ -226,10 +237,24 @@ async function tauriIO(): Promise<FileIO> {
       void drain();   // anything that arrived before we were listening
     },
     onCloseRequest(fn) {
-      void listen("close-requested", async () => { if (await fn()) await getCurrentWindow().destroy(); });
+      void getCurrentWindow().listen("close-requested", async () => { if (await fn()) await getCurrentWindow().destroy(); });
     },
-    setDirty(dirty) { void invoke("set_dirty", { dirty }); },
+    setDocState(dirty, untouched) { void invoke("set_doc_state", { dirty, untouched }); },
     setTitle(title) { void getCurrentWindow().setTitle(title); },
+    async openWindow(paths) { await invoke("open_window", { paths }); },
+    clipboard: {
+      async write(p) {
+        const custom = Object.entries(p.custom ?? {}).map(([kind, bytes]) => [kind, Array.from(bytes)]);
+        await invoke("clipboard_write", { clip: { text: p.text ?? null, html: p.html ?? null, custom } });
+      },
+      async read(custom) {
+        const r = await invoke<{ text: string | null; html: string | null; custom: Record<string, number[]> }>("clipboard_read", { custom });
+        return {
+          text: r.text ?? undefined, html: r.html ?? undefined,
+          custom: Object.fromEntries(Object.entries(r.custom).map(([k, v]) => [k, Uint8Array.from(v)])),
+        };
+      },
+    },
   };
   return io;
 }

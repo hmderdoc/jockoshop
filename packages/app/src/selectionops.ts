@@ -1,6 +1,6 @@
 import {
-  CH_ALL, CH_BG, CH_FG, CH_GLYPH, CellGrid, type ContentLayer, type MatchContext, Selection, createCellsLayer,
-  defringe, despeckle, dominantColor, maskFromSelection, layerGrid, selectionFromMask,
+  CH_ALL, CH_BG, CH_FG, CH_GLYPH, CellGrid, type ClipCells, type ContentLayer, KD_CLIP_TYPE, type MatchContext,
+  PABLO_CLIP_TYPE, Selection, createCellsLayer, decodeClip, defringe, encodeClip, despeckle, dominantColor, maskFromSelection, layerGrid, selectionFromMask,
 } from "@killerdraw/core";
 import type { Editor } from "./editor.js";
 import { Stroke, layerInDocSpace } from "./tools.js";
@@ -163,6 +163,10 @@ export function copySelection(ed: Editor, merged = false): boolean {
   if (!n) { ed.setStatus("Nothing to copy: the selection is empty on this layer."); return false; }
   ed.clipboard = { grid, x: b.x, y: b.y };
   ed.setStatus(`Copied ${n} cells${merged ? " (merged)" : ""}. Paste makes a new layer.`);
+  // also onto the system clipboard, in our format and in Moebius's, PabloDraw's and plain text
+  ed.systemClipboard?.write(encodeClip(ed.clipboard, ed.doc.palette)).catch((err: Error) => {
+    ed.setStatus(`Copied ${n} cells here, but not to the system clipboard: ${err.message}`);
+  });
   return true;
 }
 
@@ -175,13 +179,36 @@ export function cutSelection(ed: Editor): void {
   ed.setStatus("Cut. Paste makes a new layer.");
 }
 
-/** Paste as a new layer, in place. Move it with the Move tool. */
-export function paste(ed: Editor): void {
-  const c = ed.clipboard;
+/**
+ * What a paste would paste: the system clipboard where there is one — so a copy
+ * in another window, in Moebius or PabloDraw, or plain text from anywhere — else
+ * the last copy made here.
+ */
+async function clipToPaste(ed: Editor): Promise<ClipCells | null> {
+  if (ed.systemClipboard) {
+    try {
+      const got = decodeClip(await ed.systemClipboard.read([KD_CLIP_TYPE, PABLO_CLIP_TYPE]), ed.doc.palette, ed.fg);
+      if (got) return got;
+    } catch (err) { console.error("system clipboard:", err); }
+  }
+  return ed.clipboard;
+}
+
+/**
+ * Paste as a new layer: in place when it was copied in this program, else
+ * centred in the view. Move it with the Move tool.
+ */
+export async function paste(ed: Editor): Promise<void> {
+  const c = await clipToPaste(ed);
   if (!c) { ed.setStatus("Nothing to paste."); return; }
   const layer = createCellsLayer("Pasted", c.grid.width, c.grid.height);
   layer.grid = c.grid.clone();
-  layer.x = c.x; layer.y = c.y;
+  if (c.x !== undefined && c.y !== undefined) { layer.x = c.x; layer.y = c.y; }
+  else {
+    const at = ed.pasteCentre();
+    layer.x = at ? Math.max(0, at.x - (c.grid.width >> 1)) : 0;
+    layer.y = at ? Math.max(0, at.y - (c.grid.height >> 1)) : 0;
+  }
   ed.addLayer(layer, "Paste");
   ed.setSelection(null);
   ed.chooseTool("move");

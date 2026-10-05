@@ -1,5 +1,5 @@
 import {
-  type BitmapFont, type CellGrid, type CellsLayer, type Color, type Command, type Composite, type ContentLayer,
+  type BitmapFont, type CellGrid, type CellsLayer, type ClipCells, type ClipPayload, type Color, type Command, type Composite, type ContentLayer,
   type GlyphInfo, History, type KdDocument, type Layer, REMAP_DEFAULTS, type Rect, type RemapOptions, type SelectMode,
   type Selection, type ShapeFill, type ShapeLayer, type ShapeStyle, WAND_DEFAULTS,
   type WandOptions, composite, createDocument, findLayer, glyphInfoFromFont, groupCommand, isLowAscii, propertyCommand,
@@ -105,7 +105,12 @@ export class Editor {
    * wants to go and resize the canvas mid-sentence.
    */
   autoGrowHeight = true;
-  clipboard: { grid: CellGrid; x: number; y: number } | null = null;
+  /** the last copy, for when there is no system clipboard to read back (a browser) */
+  clipboard: ClipCells | null = null;
+  /** the system clipboard, shared with other windows and other editors (desktop) */
+  systemClipboard: { write(p: ClipPayload): Promise<void>; read(custom: string[]): Promise<ClipPayload> } | null = null;
+  /** where a paste from another program lands: the cell at the middle of the view (set by the view) */
+  pasteCentre: () => { x: number; y: number } | null = () => null;
   /** whether palette-swap presets and randomize also move the greys / white */
   remapOptions: RemapOptions = { ...REMAP_DEFAULTS };
   /** the Find tool's fields, kept here so they survive the sidebar being rebuilt */

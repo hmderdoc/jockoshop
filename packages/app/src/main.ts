@@ -25,6 +25,7 @@ import { buildRight } from "./right.js";
 import { liveProp, setBrushSize } from "./sections.js";
 
 import { importImage, scheduleImageRefresh } from "./shadeans.js";
+import { checkForUpdate } from "./updates.js";
 import { copySelection, cutSelection, deleteSelection, paste, selectAll, selectInverse, selectNone } from "./selectionops.js";
 import { createSelectTools, createTools, pickUp } from "./tools.js";
 import { colorName, download, field, glyphLabel, h, numberInput } from "./ui.js";
@@ -47,6 +48,8 @@ async function start(): Promise<void> {
   const tools = [...createTools(ed), ...createSelectTools(ed)];
   const currentTool = () => tools.find((t) => t.id === ed.tool)!;
   const view = new CanvasView(ed, currentTool);
+  ed.systemClipboard = io.clipboard ?? null;
+  ed.pasteCentre = () => { const r = view.root.getBoundingClientRect(); return view.cellAt(r.left + r.width / 2, r.top + r.height / 2); };
   // collaboration: the client drives the document through the Editor's events, the panel floats over the canvas
   const joint = new JointClient(ed, view);
   ed.joint = joint;
@@ -103,8 +106,13 @@ async function start(): Promise<void> {
     return high > g.glyph.length / 50 ? " It names no font, so it is drawn in IBM VGA — if that is Amiga art, pick an Amiga font from the top bar." : "";
   };
 
+  /** a file has been opened into this window (a window that has had none, and no edits, takes the next one the OS opens) */
+  let opened = false;
+  const untouched = (): boolean => !opened && !ed.dirty && !ed.history.canUndo && !joint.connected;
+
   /** Open a picked file as the document: a project, or flat art as a one-layer document. */
   const openPicked = (file: Picked): void => {
+    opened = true;
     try {
       const project = isProject(file.name);
       const art = project ? null : parseArt(file.bytes, file.name);
@@ -124,10 +132,17 @@ async function start(): Promise<void> {
     return saveProjectFile();   // a cancelled Save As means the whole thing is off
   };
 
+  /**
+   * Open a file as a document. On the desktop it gets a window of its own,
+   * unless this window has nothing in it yet; in a browser it replaces this one.
+   */
+  const openAsDocument = async (file: Picked, what: string): Promise<void> => {
+    if (io.openWindow && file.path && !untouched()) { await io.openWindow([file.path]); return; }
+    if (await confirmDiscard(what)) openPicked(file);
+  };
   const openFile = async (): Promise<void> => {
-    if (!(await confirmDiscard("opening another file"))) return;
     const file = await io.open([...PROJECT_EXTENSIONS, ...ART]);
-    if (file) openPicked(file);
+    if (file) await openAsDocument(file, "opening another file");
   };
 
   const importLayer = async (): Promise<void> => {
@@ -154,17 +169,24 @@ async function start(): Promise<void> {
     return true;
   };
   const newDocument = async (): Promise<void> => {
+    if (io.openWindow) { await io.openWindow([]); return; }   // desktop: a window per document
     if (!await confirmDiscard("starting a new document")) return;
     ed.setDocument(createDocument(80, 25), "untitled");
     ed.emit("preview", "flat");   // the welcome piece's wiggle ends where your own work begins
   };
 
   io.onOpenRequest((files, at) => {
-    // a project replaces the document; art and images become layers — an image lands where it was dropped
+    // Opened by the OS (Finder, the command line; no drop point): the first file is the document, as in any editor.
+    // Dropped: a project is opened as a document; art and images become layers, an image where it landed.
     const [first] = files;
     if (!first) return;
     void (async () => {
-      if (isProject(first.name)) { if (await confirmDiscard(`opening “${first.name}”`)) openPicked(first); return; }
+      if (!at) {
+        // after the first, `untouched` is false, so on the desktop each further file gets a window of its own
+        for (const f of io.openWindow ? files : [first]) await openAsDocument(f, `opening “${f.name}”`);
+        return;
+      }
+      if (isProject(first.name)) { await openAsDocument(first, `opening “${first.name}”`); return; }
       const cell = at ? view.cellAt(at.x, at.y) ?? undefined : undefined;
       for (const f of files) {
         if (/\.(png|jpe?g|gif|webp|bmp)$/i.test(f.name)) { await importImage(ed, f.name, f.bytes, cell); continue; }
@@ -332,7 +354,7 @@ async function start(): Promise<void> {
     zoom.textContent = `${ed.zoomFit ? "fit " : ""}${ed.zoom}×`;
     zoom.classList.toggle("active", ed.zoomFit);
     jointBtn.classList.toggle("active", joint.connected);
-    io.setDirty(ed.dirty);
+    io.setDocState(ed.dirty, untouched());
     io.setTitle(`${ed.dirty ? "• " : ""}${ed.fileName} — jockoshop`);
   };
 
@@ -432,7 +454,7 @@ async function start(): Promise<void> {
   const recentMenu = h("div.menu", { hidden: true });
   const renderRecent = (): void => {
     const list = recents();
-    recentMenu.replaceChildren(...(list.length ? list.map((p) => h("button", { title: p, onclick: async () => { if (await confirmDiscard(`opening “${p.replace(/^.*[\\/]/, "")}”`)) { try { openPicked(await io.readPath(p)); } catch (err) { ed.setStatus(`Could not open ${p}: ${(err as Error).message}`); } } } }, p.replace(/^.*[\\/]/, ""), h("span.muted", {}, p.replace(/[\\/][^\\/]*$/, "").slice(-28)))) : [h("span.muted", { style: "padding:4px 8px" }, "nothing yet")]),
+    recentMenu.replaceChildren(...(list.length ? list.map((p) => h("button", { title: p, onclick: async () => { try { await openAsDocument(await io.readPath(p), `opening “${p.replace(/^.*[\\/]/, "")}”`); } catch (err) { ed.setStatus(`Could not open ${p}: ${(err as Error).message}`); } } }, p.replace(/^.*[\\/]/, ""), h("span.muted", {}, p.replace(/[\\/][^\\/]*$/, "").slice(-28)))) : [h("span.muted", { style: "padding:4px 8px" }, "nothing yet")]),
       h("button", { onclick: () => { try { localStorage.removeItem(RECENT_KEY); } catch { /* */ } renderRecent(); } }, "clear"));
   };
   renderRecent();
@@ -581,7 +603,7 @@ async function start(): Promise<void> {
     { combo: "mod+x", label: "Cut", group: "Edit", moebius: true, run: () => { if (!cutProseText("x")) cutSelection(ed); } },
     { combo: "mod+c", label: "Copy", group: "Edit", moebius: true, run: () => { if (!cutProseText("c")) void copySelection(ed, false); } },
     { combo: "mod+shift+c", label: "Copy merged", group: "Edit", run: () => void copySelection(ed, true) },
-    { combo: "mod+v", label: "Paste as layer", group: "Edit", moebius: true, when: () => !editingProse(), run: () => paste(ed) },
+    { combo: "mod+v", label: "Paste as layer", group: "Edit", moebius: true, when: () => !editingProse(), run: () => void paste(ed) },
     { combo: ["delete", "backspace"], label: "Delete selection", group: "Edit", when: () => !!ed.selection, run: () => deleteSelection(ed) },
     { combo: "mod+t", label: "Free transform", group: "Edit", run: () => {
       if (ed.chooseTool("move")) ed.setStatus(ed.selection ? "Free transform: drag a handle to scale the selected cells, inside to move them." : "Free transform: drag a handle to scale, inside to move.");
@@ -649,7 +671,7 @@ async function start(): Promise<void> {
     const text = ed.prose.selectedText();
     if (!text) return true;   // nothing selected, but still a prose edit: do not fall through to the cells clipboard
     lastTextCopy = text;
-    navigator.clipboard?.writeText(text).catch(() => { /* no clipboard access: the in-app copy still pastes */ });
+    (io.clipboard ? io.clipboard.write({ text }) : navigator.clipboard?.writeText(text))?.catch(() => { /* no clipboard access: the in-app copy still pastes */ });
     if (which === "x") ed.prose.deleteSelection();
     ed.setStatus(`${which === "x" ? "Cut" : "Copied"} ${text.length} characters.`);
     return true;
@@ -680,7 +702,7 @@ async function start(): Promise<void> {
   let welcomed = true;
   try { welcomed = localStorage.getItem(WELCOME_KEY) === "1"; localStorage.setItem(WELCOME_KEY, "1"); } catch { /* private mode: every launch is the first */ }
   if (new URLSearchParams(location.search).has("demo")) await loadDemo(ed, lib);
-  else if (!welcomed) await loadWelcome(ed);
+  else if (!welcomed && !opened) await loadWelcome(ed);   // not over a file the OS opened us with
   if (io.desktop) {
     await buildMenu({
       newDocument, open: openFile, importLayer, save: () => saveProjectFile(), saveAs: () => saveProjectFile(true),
@@ -688,11 +710,15 @@ async function start(): Promise<void> {
       exportMore: openExportDialog, upload: openCloud,
       undo: () => ed.undo(), redo: () => ed.redo(),
       selectAll: () => selectAll(ed), selectNone: () => selectNone(ed), selectInverse: () => selectInverse(ed),
-      copy: () => void copySelection(ed), cut: () => cutSelection(ed), paste: () => paste(ed), deleteSel: () => deleteSelection(ed),
+      copy: () => void copySelection(ed), cut: () => cutSelection(ed), paste: () => void paste(ed), deleteSel: () => deleteSelection(ed),
       zoomIn: () => setZoom(ed.zoom + (ed.zoom < 2 ? 0.5 : 1)), zoomOut: () => setZoom(ed.zoom - (ed.zoom <= 2 ? 0.5 : 1)),
       zoomFit: () => setZoomFit(true), canvasSize: canvasDialog, sauce: () => sauceDialog(ed), mirror: () => toggleMirror("x"),
       joint: openJoint, shortcuts: () => shortcutSheet(bindings),
+      checkUpdates: () => void checkForUpdate(ed, false),
     });
+    // once per launch, from the first window only — the others are documents opened later
+    const { getCurrentWindow } = await import("@tauri-apps/api/window");
+    if (getCurrentWindow().label === "main") void checkForUpdate(ed, true);
   }
   // `cloud` takes a transport so the smoke suite can drive the dialog against a
   // stub: a browser has no FTP, so the real one can only refuse

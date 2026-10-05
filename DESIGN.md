@@ -314,6 +314,29 @@ Order is flexible; everything here is in scope.
 7. **Done** — opacity by re-matching (app side: `opacity.ts`), opt-in per layer; exports use the live composite so
    the re-matched cells go out; the project file's `preview.ans` does not include them (it is built by the core).
 8. **Done (macOS)** — desktop shell. Not yet: headless CLI (`packages/cli`), recent files, Windows/Linux builds.
+   A window per document (Moebius's model): New opens a window; Open, Recent, a dropped project and Finder put a
+   file in this window while it is untouched (nothing opened, nothing drawn), else in a window of its own. The shell
+   keeps each window's queue of files and unsaved state by label (`lib.rs`); every window builds its own menu and
+   puts it up when it comes to the front, since the menu bar is shared and its items call into one webview.
+   System clipboard (`core/clipboard.ts`, `desktop/clip.rs`): copy writes our own type (every channel, absent ones
+   included, plus the origin, so pastes between windows land in place), Moebius's blocks as JSON in the HTML slot,
+   PabloDraw's `pablo` type (width, height, TundraDraw body) and Unicode text; paste prefers them in that order and
+   always makes a layer. Copy is from the active layer, or flattened with Shift. On a Mac the clipboard is written
+   through NSPasteboard's own setters: an NSPasteboardItem drops a non-UTI type such as `pablo` (measured).
+   Moebius both ways is tested against its own `clipboard.js`. **(unverified)**: pasting into and out of a running
+   PabloDraw (the bytes follow its source and land on the pasteboard under the same `dyn.` UTI Eto's
+   `setData:forType:` gives "pablo", but PabloDraw itself has not been run), and the clipboard on Windows/Linux.
+   Updates (`app/updates.ts`, tauri-plugin-updater): checked quietly at launch from the first window, and from
+   jockoshop → Check for Updates…; installing waits until no window has unsaved changes (the Windows installer
+   closes the app; the restart closes every window). Signed with a minisign key (`~/.tauri/jockoshop-updater.key`,
+   password in the login keychain as `jockoshop-updater-key`, both also GitHub secrets); `requireSignedVersion` is
+   on. Release builds add `tauri.release.conf.json` (signed updater artifacts) — local builds have no key and leave
+   it out. The feed is `latest.json` on the `update-feed` branch, built after all build jobs by
+   `scripts/update-feed.mjs` (releases are pre-releases, which GitHub's `releases/latest` skips). Measured end to
+   end on macOS with a local feed: 0.1.98 found 0.1.99, downloaded, installed over itself and restarted; with
+   unsaved changes it refused; a tampered download failed signature verification. **(unverified)**: Windows and
+   Linux updates, and the CI feed job itself until the first release runs it. Installs older than the first
+   release with the updater have to be updated by hand once.
 
 Not planned yet, not precluded: animation, collaboration.
 

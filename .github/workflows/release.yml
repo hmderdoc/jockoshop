@@ -113,6 +113,10 @@ jobs:
           # step above puts them in the environment, trimmed, and only when all
           # three are set. Listing them here would define them as empty strings
           # when the secrets are absent, which Tauri reads as present.
+          # Signs the updater artifacts (.app.tar.gz, setup.exe, .AppImage); the
+          # public half is plugins.updater.pubkey in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: packages/desktop
           tagName: ${{ github.ref_name }}
@@ -120,5 +124,47 @@ jobs:
           # tells the truth about each state, so the notes cannot outlive the setup
           releaseBody: ${{ secrets.APPLE_SIGNING_IDENTITY != '' && 'macOS builds are signed but not yet notarized, so macOS still warns the first time — right-click the app and choose Open. Windows and Linux builds are unsigned.' || 'Unsigned builds. macOS shows an unidentified developer warning the first time — right-click the app and choose Open.' }}
           prerelease: true
+          # latest.json is made once, by the update-feed job below
           includeUpdaterJson: false
-          args: ${{ matrix.args }}
+          # tauri.release.conf.json turns on the signed updater artifacts; it is
+          # left out of local builds, which have no signing key
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+
+  # The feed the app's updater reads: latest.json on the update-feed branch,
+  # built from the signed assets once every build job has finished (see
+  # scripts/update-feed.mjs for why not includeUpdaterJson). A branch rather than
+  # releases/latest because these are pre-releases, which "latest" skips. A
+  # platform whose build failed is left out; the others still update.
+  update-feed:
+    needs: build
+    if: ${{ !cancelled() && startsWith(github.ref, 'refs/tags/v') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+
+      - name: latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          node scripts/update-feed.mjs "${{ github.ref_name }}" > "$RUNNER_TEMP/latest.json"
+          cat "$RUNNER_TEMP/latest.json"
+
+      - name: Publish to the update-feed branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --heads origin update-feed >/dev/null; then
+            git fetch --depth 1 origin update-feed:refs/remotes/origin/update-feed
+            git switch -c update-feed origin/update-feed
+          else
+            git switch --orphan update-feed
+          fi
+          cp "$RUNNER_TEMP/latest.json" latest.json
+          git add latest.json
+          # a re-run of the same release changes nothing
+          git diff --cached --quiet || git commit -m "latest.json for ${{ github.ref_name }}"
+          git push origin update-feed
